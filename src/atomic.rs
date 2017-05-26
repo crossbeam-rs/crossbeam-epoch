@@ -769,3 +769,31 @@ impl<'scope, T> Default for Ptr<'scope, T> {
         Ptr::null()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Ptr;
+    use std::sync::atomic::Ordering::SeqCst;
+
+    #[test]
+    fn valid_tag_i8() {
+        Ptr::<i8>::null().with_tag(0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn invalid_tag_i8() {
+        Ptr::<i8>::null().with_tag(1);
+    }
+
+    #[test]
+    fn valid_tag_i64() {
+        Ptr::<i64>::null().with_tag(7);
+    }
+
+    #[test]
+    #[should_panic]
+    fn invalid_tag_i64() {
+        Ptr::<i64>::null().with_tag(8);
+    }
+}
