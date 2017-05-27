@@ -399,6 +399,30 @@ impl<T> Default for Atomic<T> {
     }
 }
 
+impl<T> From<T> for Atomic<T> {
+    fn from(t: T) -> Self {
+        Atomic::new(t)
+    }
+}
+
+impl<T> From<Box<T>> for Atomic<T> {
+    fn from(b: Box<T>) -> Self {
+        Atomic::from_owned(Owned::from_box(b))
+    }
+}
+
+impl<T> From<Owned<T>> for Atomic<T> {
+    fn from(owned: Owned<T>) -> Self {
+        Atomic::from_owned(owned)
+    }
+}
+
+impl<'scope, T> From<Ptr<'scope, T>> for Atomic<T> {
+    fn from(ptr: Ptr<T>) -> Self {
+        Atomic::from_ptr(ptr)
+    }
+}
+
 /// An owned heap-allocated object.
 ///
 /// This type is very similar to `Box<T>`.
@@ -531,6 +555,18 @@ impl<T> Deref for Owned<T> {
 impl<T> DerefMut for Owned<T> {
     fn deref_mut(&mut self) -> &mut T {
         unsafe { &mut *((self.data & !low_bits::<T>()) as *mut T) }
+    }
+}
+
+impl<T> From<T> for Owned<T> {
+    fn from(t: T) -> Self {
+        Owned::new(t)
+    }
+}
+
+impl<T> From<Box<T>> for Owned<T> {
+    fn from(b: Box<T>) -> Self {
+        Owned::from_box(b)
     }
 }
 
