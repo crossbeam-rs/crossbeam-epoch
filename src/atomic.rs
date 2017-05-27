@@ -1,3 +1,4 @@
+use std::borrow::{Borrow, BorrowMut};
 use std::marker::PhantomData;
 use std::mem;
 use std::ops::{Deref, DerefMut};
@@ -567,6 +568,30 @@ impl<T> From<T> for Owned<T> {
 impl<T> From<Box<T>> for Owned<T> {
     fn from(b: Box<T>) -> Self {
         Owned::from_box(b)
+    }
+}
+
+impl<T> Borrow<T> for Owned<T> {
+    fn borrow(&self) -> &T {
+        &**self
+    }
+}
+
+impl<T> BorrowMut<T> for Owned<T> {
+    fn borrow_mut(&mut self) -> &mut T {
+        &mut **self
+    }
+}
+
+impl<T> AsRef<T> for Owned<T> {
+    fn as_ref(&self) -> &T {
+        &**self
+    }
+}
+
+impl<T> AsMut<T> for Owned<T> {
+    fn as_mut(&mut self) -> &mut T {
+        &mut **self
     }
 }
 
