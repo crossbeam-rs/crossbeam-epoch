@@ -28,6 +28,13 @@ fn ensure_aligned<T>(raw: *const T) {
     assert!(raw as usize & low_bits::<T>() == 0, "unaligned pointer");
 }
 
+/// Panics if the tag doesn't fit into the unused bits of an aligned pointer to `T`.
+#[inline]
+fn validate_tag<T>(tag: usize) {
+    let mask = low_bits::<T>();
+    assert!(tag <= mask, "tag too large to fit into the unused bits: {} > {}", tag, mask);
+}
+
 /// Returns a bitmask containing the unused least significant bits of an aligned pointer to `T`.
 #[inline]
 fn low_bits<T>() -> usize {
@@ -38,9 +45,8 @@ fn low_bits<T>() -> usize {
 /// Panics if the tag doesn't fit into the unused bits of the pointer.
 #[inline]
 fn data_with_tag<T>(data: usize, tag: usize) -> usize {
-    let mask = low_bits::<T>();
-    assert!(tag <= mask, "tag too large to fit into the unused bits: {} > {}", tag, mask);
-    (data & !mask) | tag
+    validate_tag::<T>(tag);
+    (data & !low_bits::<T>()) | tag
 }
 
 /// An atomic pointer that can be safely shared between threads.
@@ -61,7 +67,7 @@ unsafe impl<T: Send + Sync> Send for Atomic<T> {}
 unsafe impl<T: Send + Sync> Sync for Atomic<T> {}
 
 impl<T> Atomic<T> {
-    /// Returns a new atomic pointer initialized with the tagged pointer `data`.
+    /// Returns a new atomic pointer pointing to the tagged pointer `data`.
     fn from_data(data: usize) -> Self {
         Atomic {
             data: AtomicUsize::new(data),
@@ -78,7 +84,25 @@ impl<T> Atomic<T> {
     ///
     /// let a = Atomic::<i32>::null();
     /// ```
+    #[cfg(not(feature = "nightly"))]
     pub fn null() -> Self {
+        Atomic {
+            data: AtomicUsize::new(0),
+            _marker: PhantomData,
+        }
+    }
+
+    /// Returns a new null atomic pointer.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use crossbeam_epoch::Atomic;
+    ///
+    /// let a = Atomic::<i32>::null();
+    /// ```
+    #[cfg(feature = "nightly")]
+    pub const fn null() -> Self {
         Atomic {
             data: AtomicUsize::new(0),
             _marker: PhantomData,
@@ -242,10 +266,11 @@ impl<T> Atomic<T> {
         ord: Ordering,
         _: &'scope Scope,
     ) -> Result<(), Ptr<'scope, T>> {
-        let fail_ord = strongest_failure_ordering(ord);
-        match self.data.compare_exchange(current.data, new.data, ord, fail_ord) {
-            Ok(_) => Ok(()),
-            Err(previous) => Err(Ptr::from_data(previous)),
+        let previous = self.data.compare_and_swap(current.data, new.data, ord);
+        if previous == current.data {
+            Ok(())
+        } else {
+            Err(Ptr::from_data(previous))
         }
     }
 
@@ -325,14 +350,13 @@ impl<T> Atomic<T> {
         ord: Ordering,
         _: &'scope Scope,
     ) -> Result<Ptr<'scope, T>, (Ptr<'scope, T>, Owned<T>)> {
-        let fail_ord = strongest_failure_ordering(ord);
-        match self.data.compare_exchange(current.data, new.data, ord, fail_ord) {
-            Ok(_) => {
-                let data = new.data;
-                mem::forget(new);
-                Ok(Ptr::from_data(data))
-            }
-            Err(previous) => Err((Ptr::from_data(previous), new)),
+        let previous = self.data.compare_and_swap(current.data, new.data, ord);
+        if previous == current.data {
+            let data = new.data;
+            mem::forget(new);
+            Ok(Ptr::from_data(data))
+        } else {
+            Err((Ptr::from_data(previous), new))
         }
     }
 
@@ -392,6 +416,102 @@ impl<T> Atomic<T> {
             Err(previous) => Err((Ptr::from_data(previous), new)),
         }
     }
+
+    /// Bitwise "and" with the current tag.
+    ///
+    /// Performs a bitwise "and" operation on the current tag and the argument `val`, and sets the
+    /// new tag to the result. Returns the previous pointer.
+    ///
+    /// This method takes an [`Ordering`] argument which describes the memory ordering of this
+    /// operation.
+    ///
+    /// [`Ordering`]: https://doc.rust-lang.org/std/sync/atomic/enum.Ordering.html
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use crossbeam_epoch::{self as epoch, Atomic, Ptr};
+    /// use std::sync::atomic::Ordering::SeqCst;
+    ///
+    /// let a = Atomic::<i32>::from_ptr(Ptr::null().with_tag(3));
+    /// epoch::pin(|scope| {
+    ///     assert_eq!(a.fetch_and(2, SeqCst, scope).tag(), 3);
+    ///     assert_eq!(a.load(SeqCst, scope).tag(), 2);
+    /// });
+    /// ```
+    pub fn fetch_and<'scope>(
+        &self,
+        val: usize,
+        ord: Ordering,
+        _: &'scope Scope,
+    ) -> Ptr<'scope, T> {
+        validate_tag::<T>(val);
+        Ptr::from_data(self.data.fetch_and(val, ord))
+    }
+
+    /// Bitwise "or" with the current tag.
+    ///
+    /// Performs a bitwise "or" operation on the current tag and the argument `val`, and sets the
+    /// new tag to the result. Returns the previous pointer.
+    ///
+    /// This method takes an [`Ordering`] argument which describes the memory ordering of this
+    /// operation.
+    ///
+    /// [`Ordering`]: https://doc.rust-lang.org/std/sync/atomic/enum.Ordering.html
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use crossbeam_epoch::{self as epoch, Atomic, Ptr};
+    /// use std::sync::atomic::Ordering::SeqCst;
+    ///
+    /// let a = Atomic::<i32>::from_ptr(Ptr::null().with_tag(1));
+    /// epoch::pin(|scope| {
+    ///     assert_eq!(a.fetch_or(2, SeqCst, scope).tag(), 1);
+    ///     assert_eq!(a.load(SeqCst, scope).tag(), 3);
+    /// });
+    /// ```
+    pub fn fetch_or<'scope>(
+        &self,
+        val: usize,
+        ord: Ordering,
+        _: &'scope Scope,
+    ) -> Ptr<'scope, T> {
+        validate_tag::<T>(val);
+        Ptr::from_data(self.data.fetch_or(val, ord))
+    }
+
+    /// Bitwise "xor" with the current tag.
+    ///
+    /// Performs a bitwise "xor" operation on the current tag and the argument `val`, and sets the
+    /// new tag to the result. Returns the previous pointer.
+    ///
+    /// This method takes an [`Ordering`] argument which describes the memory ordering of this
+    /// operation.
+    ///
+    /// [`Ordering`]: https://doc.rust-lang.org/std/sync/atomic/enum.Ordering.html
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use crossbeam_epoch::{self as epoch, Atomic, Ptr};
+    /// use std::sync::atomic::Ordering::SeqCst;
+    ///
+    /// let a = Atomic::<i32>::from_ptr(Ptr::null().with_tag(1));
+    /// epoch::pin(|scope| {
+    ///     assert_eq!(a.fetch_xor(3, SeqCst, scope).tag(), 1);
+    ///     assert_eq!(a.load(SeqCst, scope).tag(), 2);
+    /// });
+    /// ```
+    pub fn fetch_xor<'scope>(
+        &self,
+        val: usize,
+        ord: Ordering,
+        _: &'scope Scope,
+    ) -> Ptr<'scope, T> {
+        validate_tag::<T>(val);
+        Ptr::from_data(self.data.fetch_xor(val, ord))
+    }
 }
 
 impl<T> Default for Atomic<T> {
@@ -437,7 +557,7 @@ pub struct Owned<T> {
 }
 
 impl<T> Owned<T> {
-    /// Returns a new owned pointer initialized with the tagged pointer `data`.
+    /// Returns a new owned pointer pointing to the tagged pointer `data`.
     fn from_data(data: usize) -> Self {
         Owned {
             data: data,
@@ -458,7 +578,7 @@ impl<T> Owned<T> {
         Self::from_box(Box::new(value))
     }
 
-    /// Returns a new owned pointer initialized with `b`.
+    /// Returns a new owned pointer pointing to `b`.
     ///
     /// # Panics
     ///
@@ -475,7 +595,11 @@ impl<T> Owned<T> {
         unsafe { Self::from_raw(Box::into_raw(b)) }
     }
 
-    /// Returns a new owned pointer initialized with `raw`.
+    /// Returns a new owned pointer pointing to `raw`.
+    ///
+    /// This function is unsafe because improper use may lead to memory problems. Argument `raw`
+    /// must be a valid pointer. Also, a double-free may occur if the function is called twice on
+    /// the same raw pointer.
     ///
     /// # Panics
     ///
@@ -619,7 +743,7 @@ impl<'scope, T> Clone for Ptr<'scope, T> {
 impl<'scope, T> Copy for Ptr<'scope, T> {}
 
 impl<'scope, T> Ptr<'scope, T> {
-    /// Returns a new pointer initialized with the tagged pointer `data`.
+    /// Returns a new pointer pointing to the tagged pointer `data`.
     fn from_data(data: usize) -> Self {
         Ptr {
             data: data,
@@ -644,7 +768,7 @@ impl<'scope, T> Ptr<'scope, T> {
         }
     }
 
-    /// Returns a new pointer initialized with `raw`.
+    /// Returns a new pointer pointing to `raw`.
     ///
     /// # Panics
     ///
@@ -834,7 +958,6 @@ impl<'scope, T> Default for Ptr<'scope, T> {
 #[cfg(test)]
 mod tests {
     use super::Ptr;
-    use std::sync::atomic::Ordering::SeqCst;
 
     #[test]
     fn valid_tag_i8() {

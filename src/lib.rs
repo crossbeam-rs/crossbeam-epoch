@@ -1,3 +1,5 @@
+#![cfg_attr(feature = "nightly", feature(const_fn))]
+
 mod atomic;
 
 pub use atomic::{Atomic, Owned, Ptr};
