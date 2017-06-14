@@ -266,11 +266,10 @@ impl<T> Atomic<T> {
         ord: Ordering,
         _: &'scope Scope,
     ) -> Result<(), Ptr<'scope, T>> {
-        let previous = self.data.compare_and_swap(current.data, new.data, ord);
-        if previous == current.data {
-            Ok(())
-        } else {
-            Err(Ptr::from_data(previous))
+        let fail_ord = strongest_failure_ordering(ord);
+        match self.data.compare_exchange(current.data, new.data, ord, fail_ord) {
+            Ok(_) => Ok(()),
+            Err(previous) => Err(Ptr::from_data(previous)),
         }
     }
 
@@ -350,13 +349,14 @@ impl<T> Atomic<T> {
         ord: Ordering,
         _: &'scope Scope,
     ) -> Result<Ptr<'scope, T>, (Ptr<'scope, T>, Owned<T>)> {
-        let previous = self.data.compare_and_swap(current.data, new.data, ord);
-        if previous == current.data {
-            let data = new.data;
-            mem::forget(new);
-            Ok(Ptr::from_data(data))
-        } else {
-            Err((Ptr::from_data(previous), new))
+        let fail_ord = strongest_failure_ordering(ord);
+        match self.data.compare_exchange(current.data, new.data, ord, fail_ord) {
+            Ok(_) => {
+                let data = new.data;
+                mem::forget(new);
+                Ok(Ptr::from_data(data))
+            }
+            Err(previous) => Err((Ptr::from_data(previous), new)),
         }
     }
 
@@ -592,7 +592,7 @@ impl<T> Owned<T> {
     /// let o = unsafe { Owned::from_raw(Box::into_raw(Box::new(1234))) };
     /// ```
     pub fn from_box(b: Box<T>) -> Self {
-        unsafe { Self::from_raw(Box::into_raw(b)) }
+        Self::from_raw(Box::into_raw(b))
     }
 
     /// Returns a new owned pointer pointing to `raw`.
