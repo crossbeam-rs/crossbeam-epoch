@@ -2,7 +2,7 @@
 
 mod atomic;
 
-pub use atomic::{Atomic, Owned, Ptr};
+pub use atomic::{Atomic, CasOrdering, Owned, Ptr};
 
 pub struct Scope {
     _private: (),
