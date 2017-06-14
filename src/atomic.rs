@@ -612,7 +612,7 @@ impl<T> Owned<T> {
     ///
     /// let o = unsafe { Owned::from_raw(Box::into_raw(Box::new(1234))) };
     /// ```
-    pub unsafe fn from_raw(raw: *mut T) -> Self {
+    pub fn from_raw(raw: *mut T) -> Self {
         ensure_aligned(raw);
         Self::from_data(raw as usize)
     }
@@ -782,7 +782,7 @@ impl<'scope, T> Ptr<'scope, T> {
     /// let p = unsafe { Ptr::from_raw(Box::into_raw(Box::new(1234))) };
     /// assert!(!p.is_null());
     /// ```
-    pub unsafe fn from_raw(raw: *const T) -> Self {
+    pub fn from_raw(raw: *const T) -> Self {
         ensure_aligned(raw);
         Ptr {
             data: raw as usize,
@@ -836,21 +836,17 @@ impl<'scope, T> Ptr<'scope, T> {
     ///
     /// # Safety
     ///
-    /// Dereferencing a pointer to an invalid object is not a concern, since invalid `Ptr`s
-    /// can only be constructed via other unsafe functions.
+    /// Dereferencing a pointer is unsafe because it could be pointing to invalid memory.
     ///
-    /// However, this method doesn't check whether the pointer is null, so dereferencing a null
-    /// pointer is unsafe.
+    /// Another concern is the possiblity of data races due to lack of proper synchronization.
+    /// For example, consider the following scenario:
     ///
-    /// Another source of unsafety is the possibility of unsynchronized reads to the objects.
-    /// For example, the following scenario is unsafe:
-    ///
-    /// * A thread stores a new object: `a.store_owned(Owned::new(10), Relaxed)`
-    /// * Another thread reads it: `*a.load(Relaxed, scope).as_ref().unwrap()`
+    /// 1. A thread creates a new object: `a.store_owned(Owned::new(10), Relaxed)`
+    /// 2. Another thread reads it: `*a.load(Relaxed, scope).as_ref().unwrap()`
     ///
     /// The problem is that relaxed orderings don't synchronize initialization of the object with
     /// the read from the second thread. This is a data race. A possible solution would be to use
-    /// `Release` and `Acquire` orderings (or stronger).
+    /// `Release` and `Acquire` orderings.
     ///
     /// # Examples
     ///
@@ -876,19 +872,17 @@ impl<'scope, T> Ptr<'scope, T> {
     ///
     /// # Safety
     ///
-    /// This method checks whether the pointer is null, and if not, assumes that it's pointing to a
-    /// valid object. However, this is not considered a source of unsafety because invalid `Ptr`s
-    /// can only be constructed via other unsafe functions.
+    /// Dereferencing a pointer is unsafe because it could be pointing to invalid memory.
     ///
-    /// The only source of unsafety is the possibility of unsynchronized reads to the objects.
-    /// For example, the following scenario is unsafe:
+    /// Another concern is the possiblity of data races due to lack of proper synchronization.
+    /// For example, consider the following scenario:
     ///
-    /// * A thread stores a new object: `a.store_owned(Owned::new(10), Relaxed)`
-    /// * Another thread reads it: `*a.load(Relaxed, scope).as_ref().unwrap()`
+    /// 1. A thread creates a new object: `a.store_owned(Owned::new(10), Relaxed)`
+    /// 2. Another thread reads it: `*a.load(Relaxed, scope).as_ref().unwrap()`
     ///
     /// The problem is that relaxed orderings don't synchronize initialization of the object with
     /// the read from the second thread. This is a data race. A possible solution would be to use
-    /// `Release` and `Acquire` orderings (or stronger).
+    /// `Release` and `Acquire` orderings.
     ///
     /// # Examples
     ///
