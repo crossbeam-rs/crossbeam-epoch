@@ -43,18 +43,26 @@ pub trait CasOrdering {
 
 impl CasOrdering for Ordering {
     #[inline]
-    fn success(&self) -> Ordering { *self }
+    fn success(&self) -> Ordering {
+        *self
+    }
 
     #[inline]
-    fn failure(&self) -> Ordering { strongest_failure_ordering(*self) }
+    fn failure(&self) -> Ordering {
+        strongest_failure_ordering(*self)
+    }
 }
 
 impl CasOrdering for (Ordering, Ordering) {
     #[inline]
-    fn success(&self) -> Ordering { self.0 }
+    fn success(&self) -> Ordering {
+        self.0
+    }
 
     #[inline]
-    fn failure(&self) -> Ordering { self.1 }
+    fn failure(&self) -> Ordering {
+        self.1
+    }
 }
 
 /// Panics if the pointer is not properly unaligned.
@@ -67,7 +75,12 @@ fn ensure_aligned<T>(raw: *const T) {
 #[inline]
 fn validate_tag<T>(tag: usize) {
     let mask = low_bits::<T>();
-    assert!(tag <= mask, "tag too large to fit into the unused bits: {} > {}", tag, mask);
+    assert!(
+        tag <= mask,
+        "tag too large to fit into the unused bits: {} > {}",
+        tag,
+        mask
+    );
 }
 
 /// Returns a bitmask containing the unused least significant bits of an aligned pointer to `T`.
@@ -301,7 +314,12 @@ impl<T> Atomic<T> {
         ord: O,
         _: &'scope Scope,
     ) -> Result<(), Ptr<'scope, T>> {
-        match self.data.compare_exchange(current.data, new.data, ord.success(), ord.failure()) {
+        match self.data.compare_exchange(
+            current.data,
+            new.data,
+            ord.success(),
+            ord.failure(),
+        ) {
             Ok(_) => Ok(()),
             Err(previous) => Err(Ptr::from_data(previous)),
         }
@@ -387,7 +405,12 @@ impl<T> Atomic<T> {
         ord: O,
         _: &'scope Scope,
     ) -> Result<Ptr<'scope, T>, (Ptr<'scope, T>, Owned<T>)> {
-        match self.data.compare_exchange(current.data, new.data, ord.success(), ord.failure()) {
+        match self.data.compare_exchange(
+            current.data,
+            new.data,
+            ord.success(),
+            ord.failure(),
+        ) {
             Ok(_) => {
                 let data = new.data;
                 mem::forget(new);
@@ -480,12 +503,7 @@ impl<T> Atomic<T> {
     ///     assert_eq!(a.load(SeqCst, scope).tag(), 2);
     /// });
     /// ```
-    pub fn fetch_and<'scope>(
-        &self,
-        val: usize,
-        ord: Ordering,
-        _: &'scope Scope,
-    ) -> Ptr<'scope, T> {
+    pub fn fetch_and<'scope>(&self, val: usize, ord: Ordering, _: &'scope Scope) -> Ptr<'scope, T> {
         validate_tag::<T>(val);
         Ptr::from_data(self.data.fetch_and(val, ord))
     }
@@ -512,12 +530,7 @@ impl<T> Atomic<T> {
     ///     assert_eq!(a.load(SeqCst, scope).tag(), 3);
     /// });
     /// ```
-    pub fn fetch_or<'scope>(
-        &self,
-        val: usize,
-        ord: Ordering,
-        _: &'scope Scope,
-    ) -> Ptr<'scope, T> {
+    pub fn fetch_or<'scope>(&self, val: usize, ord: Ordering, _: &'scope Scope) -> Ptr<'scope, T> {
         validate_tag::<T>(val);
         Ptr::from_data(self.data.fetch_or(val, ord))
     }
@@ -544,12 +557,7 @@ impl<T> Atomic<T> {
     ///     assert_eq!(a.load(SeqCst, scope).tag(), 2);
     /// });
     /// ```
-    pub fn fetch_xor<'scope>(
-        &self,
-        val: usize,
-        ord: Ordering,
-        _: &'scope Scope,
-    ) -> Ptr<'scope, T> {
+    pub fn fetch_xor<'scope>(&self, val: usize, ord: Ordering, _: &'scope Scope) -> Ptr<'scope, T> {
         validate_tag::<T>(val);
         Ptr::from_data(self.data.fetch_xor(val, ord))
     }
