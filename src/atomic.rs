@@ -13,11 +13,8 @@ use Scope;
 fn strongest_failure_ordering(ord: Ordering) -> Ordering {
     use self::Ordering::*;
     match ord {
-        Relaxed => Relaxed,
-        Release => Relaxed,
-        Acquire => Acquire,
-        AcqRel => Acquire,
-        SeqCst => SeqCst,
+        Relaxed | Release => Relaxed,
+        Acquire | AcqRel => Acquire,
         _ => SeqCst,
     }
 }
@@ -63,7 +60,7 @@ impl CasOrdering for (Ordering, Ordering) {
 /// Panics if the pointer is not properly unaligned.
 #[inline]
 fn ensure_aligned<T>(raw: *const T) {
-    assert!(raw as usize & low_bits::<T>() == 0, "unaligned pointer");
+    assert_eq!(raw as usize & low_bits::<T>(), 0, "unaligned pointer");
 }
 
 /// Panics if the tag doesn't fit into the unused bits of an aligned pointer to `T`.
@@ -769,7 +766,7 @@ impl<T> AsMut<T> for Owned<T> {
 ///
 /// The pointer must be properly aligned. Since it is aligned, a tag can be stored into the unused
 /// least significant bits of the address.
-#[derive(Debug)]
+#[derive(Copy, Debug)]
 pub struct Ptr<'scope, T: 'scope> {
     data: usize,
     _marker: PhantomData<&'scope T>,
@@ -783,8 +780,6 @@ impl<'scope, T> Clone for Ptr<'scope, T> {
         }
     }
 }
-
-impl<'scope, T> Copy for Ptr<'scope, T> {}
 
 impl<'scope, T> Ptr<'scope, T> {
     /// Returns a new pointer pointing to the tagged pointer `data`.
