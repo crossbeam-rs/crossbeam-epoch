@@ -19,18 +19,18 @@ fn strongest_failure_ordering(ord: Ordering) -> Ordering {
     }
 }
 
-/// Memory orderings for compare-and-set.
+/// Memory orderings for compare-exchange operations.
 ///
-/// A compare-and-set operation can have different memory orderings depending on whether it
+/// A compare-exchange operation can have different memory orderings depending on whether it
 /// succeeds or fails. This trait generalizes different ways of specifying memory orderings.
 ///
-/// The two ways of specifying orderings for compare-and-set are:
+/// The two ways of specifying orderings for compare-exchange are:
 ///
 /// 1. Just one `Ordering` for the success case. In case of failure, the strongest appropriate
 ///    ordering is chosen.
 /// 2. A pair of `Ordering`s. The first one is for the success case, while the second one is
 ///    for the failure case.
-pub trait CasOrdering {
+pub trait CompareExchangeOrdering {
     /// The ordering of the operation when it succeeds.
     fn success(&self) -> Ordering;
 
@@ -41,7 +41,7 @@ pub trait CasOrdering {
     fn failure(&self) -> Ordering;
 }
 
-impl CasOrdering for Ordering {
+impl CompareExchangeOrdering for Ordering {
     #[inline]
     fn success(&self) -> Ordering {
         *self
@@ -53,7 +53,7 @@ impl CasOrdering for Ordering {
     }
 }
 
-impl CasOrdering for (Ordering, Ordering) {
+impl CompareExchangeOrdering for (Ordering, Ordering) {
     #[inline]
     fn success(&self) -> Ordering {
         self.0
@@ -289,10 +289,10 @@ impl<T> Atomic<T> {
     /// The return value is a result indicating whether the new pointer was written. On failure the
     /// actual current value is returned.
     ///
-    /// This method takes a [`CasOrdering`] argument which describes the memory ordering of this
-    /// operation.
+    /// This method takes a [`CompareExchangeOrdering`] argument which describes the memory
+    /// ordering of this operation.
     ///
-    /// [`CasOrdering`]: trait.CasOrdering.html
+    /// [`CompareExchangeOrdering`]: trait.CompareExchangeOrdering.html
     ///
     /// # Examples
     ///
@@ -304,16 +304,19 @@ impl<T> Atomic<T> {
     ///
     /// epoch::pin(|scope| {
     ///     let mut curr = a.load(SeqCst, scope);
-    ///     let res = a.compare_and_set(curr, Ptr::null(), SeqCst, scope);
+    ///     let res = a.compare_exchange(curr, Ptr::null(), SeqCst, scope);
     /// });
     /// ```
-    pub fn compare_and_set<'scope, O: CasOrdering>(
+    pub fn compare_exchange<'scope, O>(
         &self,
         current: Ptr<T>,
         new: Ptr<T>,
         ord: O,
         _: &'scope Scope,
-    ) -> Result<(), Ptr<'scope, T>> {
+    ) -> Result<(), Ptr<'scope, T>>
+    where
+        O: CompareExchangeOrdering,
+    {
         match self.data.compare_exchange(
             current.data,
             new.data,
@@ -327,16 +330,16 @@ impl<T> Atomic<T> {
 
     /// Stores `new` into the atomic pointer if the current value is the same as `current`.
     ///
-    /// Unlike [`compare_and_set`], this method is allowed to spuriously fail even when
+    /// Unlike [`compare_exchange`], this method is allowed to spuriously fail even when
     /// comparison succeeds, which can result in more efficient code on some platforms.
     /// The return value is a result indicating whether the new pointer was written. On failure the
     /// actual current value is returned.
     ///
-    /// This method takes a [`CasOrdering`] argument which describes the memory ordering of this
-    /// operation.
+    /// This method takes a [`CompareExchangeOrdering`] argument which describes the memory
+    /// ordering of this operation.
     ///
-    /// [`compare_and_set`]: struct.Atomic.html#method.compare_and_set
-    /// [`CasOrdering`]: trait.CasOrdering.html
+    /// [`compare_exchange`]: struct.Atomic.html#method.compare_exchange
+    /// [`CompareExchangeOrdering`]: trait.CompareExchangeOrdering.html
     ///
     /// # Examples
     ///
@@ -349,20 +352,23 @@ impl<T> Atomic<T> {
     /// epoch::pin(|scope| {
     ///     let mut curr = a.load(SeqCst, scope);
     ///     loop {
-    ///         match a.compare_and_set(curr, Ptr::null(), SeqCst, scope) {
+    ///         match a.compare_exchange(curr, Ptr::null(), SeqCst, scope) {
     ///             Ok(()) => break,
     ///             Err(c) => curr = c,
     ///         }
     ///     }
     /// });
     /// ```
-    pub fn compare_ans_set_weak<'scope, O: CasOrdering>(
+    pub fn compare_exchange_weak<'scope, O>(
         &self,
         current: Ptr<T>,
         new: Ptr<T>,
         ord: O,
         _: &'scope Scope,
-    ) -> Result<(), Ptr<'scope, T>> {
+    ) -> Result<(), Ptr<'scope, T>>
+    where
+        O: CompareExchangeOrdering,
+    {
         match self.data.compare_exchange_weak(
             current.data,
             new.data,
@@ -380,10 +386,10 @@ impl<T> Atomic<T> {
     /// pointer that was written is returned. On failure `new` and the actual current value are
     /// returned.
     ///
-    /// This method takes a [`CasOrdering`] argument which describes the memory ordering of this
-    /// operation.
+    /// This method takes a [`CompareExchangeOrdering`] argument which describes the memory
+    /// ordering of this operation.
     ///
-    /// [`CasOrdering`]: trait.CasOrdering.html
+    /// [`CompareExchangeOrdering`]: trait.CompareExchangeOrdering.html
     ///
     /// # Examples
     ///
@@ -395,16 +401,19 @@ impl<T> Atomic<T> {
     ///
     /// epoch::pin(|scope| {
     ///     let mut curr = a.load(SeqCst, scope);
-    ///     let res = a.compare_and_set_owned(curr, Owned::new(5678), SeqCst, scope);
+    ///     let res = a.compare_exchange_owned(curr, Owned::new(5678), SeqCst, scope);
     /// });
     /// ```
-    pub fn compare_and_set_owned<'scope, O: CasOrdering>(
+    pub fn compare_exchange_owned<'scope, O>(
         &self,
         current: Ptr<T>,
         new: Owned<T>,
         ord: O,
         _: &'scope Scope,
-    ) -> Result<Ptr<'scope, T>, (Ptr<'scope, T>, Owned<T>)> {
+    ) -> Result<Ptr<'scope, T>, (Ptr<'scope, T>, Owned<T>)>
+    where
+        O: CompareExchangeOrdering,
+    {
         match self.data.compare_exchange(
             current.data,
             new.data,
@@ -422,17 +431,17 @@ impl<T> Atomic<T> {
 
     /// Stores `new` into the atomic pointer if the current value is the same as `current`.
     ///
-    /// Unlike [`compare_and_set_owned`], this method is allowed to spuriously fail even when
+    /// Unlike [`compare_exchange_owned`], this method is allowed to spuriously fail even when
     /// comparison succeeds, which can result in more efficient code on some platforms.
     /// The return value is a result indicating whether the new pointer was written. On success the
     /// pointer that was written is returned. On failure `new` and the actual current value are
     /// returned.
     ///
-    /// This method takes a [`CasOrdering`] argument which describes the memory ordering of this
-    /// operation.
+    /// This method takes a [`CompareExchangeOrdering`] argument which describes the memory
+    /// ordering of this operation.
     ///
-    /// [`compare_and_set_owned`]: struct.Atomic.html#method.compare_and_set_owned
-    /// [`CasOrdering`]: trait.CasOrdering.html
+    /// [`compare_exchange_owned`]: struct.Atomic.html#method.compare_exchange_owned
+    /// [`CompareExchangeOrdering`]: trait.CompareExchangeOrdering.html
     ///
     /// # Examples
     ///
@@ -446,7 +455,7 @@ impl<T> Atomic<T> {
     ///     let mut new = Owned::new(5678);
     ///     let mut ptr = a.load(SeqCst, scope);
     ///     loop {
-    ///         match a.compare_and_set_weak_owned(ptr, new, SeqCst, scope) {
+    ///         match a.compare_exchange_weak_owned(ptr, new, SeqCst, scope) {
     ///             Ok(p) => {
     ///                 ptr = p;
     ///                 break;
@@ -459,13 +468,16 @@ impl<T> Atomic<T> {
     ///     }
     /// });
     /// ```
-    pub fn compare_and_set_weak_owned<'scope, O: CasOrdering>(
+    pub fn compare_exchange_weak_owned<'scope, O>(
         &self,
         current: Ptr<T>,
         new: Owned<T>,
         ord: O,
         _: &'scope Scope,
-    ) -> Result<Ptr<'scope, T>, (Ptr<'scope, T>, Owned<T>)> {
+    ) -> Result<Ptr<'scope, T>, (Ptr<'scope, T>, Owned<T>)>
+    where
+        O: CompareExchangeOrdering,
+    {
         match self.data.compare_exchange_weak(
             current.data,
             new.data,
