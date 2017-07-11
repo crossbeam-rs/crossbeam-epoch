@@ -32,13 +32,13 @@ fn register() -> *const Entry {
     unsafe {
         // Since we don't dereference any pointers in this block, it's okay to use `unprotected`.
         unprotected(|scope| {
-            let mut head = list.load(Acquire, scope);
+            let mut head = list.load(Relaxed, scope);
 
             loop {
                 new.next.store(head, Relaxed);
 
                 // Try installing the new entry as the new head.
-                match list.compare_and_set_weak_owned(head, new, AcqRel, scope) {
+                match list.compare_and_set_weak_owned(head, new, Release, scope) {
                     Ok(n) => return n.as_raw(),
                     Err((h, n)) => {
                         head = h;
@@ -103,16 +103,19 @@ where
 
 /// Returns an iterator over all participating threads.
 ///
-/// Note that the iterator might return the same participant multiple times.
+/// Every thread that is registered at the moment this function is called and persists at least
+/// until the end of iteration will be returned. Since this iterator traverses a lock-free linked
+/// list that may be concurrently modified, some additional caveats apply:
+///
+/// 1. If a new thread is registered during iteration, it may or may not be returned.
+/// 2. If a thread is unregistered during iteration, it may or may not be returned.
+/// 3. Any thread that gets returned may be returned multiple times.
 pub fn iter(scope: &Scope) -> Iter {
     let pred = participants();
     let curr = pred.load(Acquire, scope);
     Iter { scope, pred, curr }
 }
 
-/// An iterator over all participating threads.
-///
-/// Note that the iterator might return the same participant multiple times.
 pub struct Iter<'scope> {
     /// The scope in which the iterator is operating.
     scope: &'scope Scope,
@@ -136,11 +139,10 @@ impl<'scope> Iterator for Iter<'scope> {
                 let succ = succ.with_tag(0);
 
                 if self.pred
-                    .compare_and_set(self.curr, succ, AcqRel, self.scope)
+                    .compare_and_set(self.curr, succ, Release, self.scope)
                     .is_err()
                 {
-                    // We lost the race to unlink this entry. There's no option other than to
-                    // restart traversal from the beginning.
+                    // We lost the race to unlink this entry - let's start over from the beginning.
                     *self = iter(self.scope);
                     continue;
                 }
