@@ -19,9 +19,9 @@ thread_local! {
             // Since we don't dereference any pointers in this block, it's okay to use
             // `unprotected`.
             unprotected(|scope| {
-                participants().insert(Participant::new(), scope).as_raw()
+                participants().insert_head(Participant::new(), scope).as_raw()
             })
-        }
+        },
     }
 }
 

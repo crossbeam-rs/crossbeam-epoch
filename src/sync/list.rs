@@ -20,9 +20,6 @@ pub struct Iter<'scope, T: 'scope> {
     /// The scope in which the iterator is operating.
     scope: &'scope Scope,
 
-    /// Pointer to the head.
-    head: &'scope Atomic<Entry<T>>,
-
     /// Pointer from the predecessor to the current entry.
     pred: &'scope Atomic<Entry<T>>,
 
@@ -44,28 +41,32 @@ impl<T> Entry<T> {
 
 impl<T> List<T> {
     /// Returns a new, empty linked list.
-    pub fn new() -> List<T> {
+    pub fn new() -> Self {
         List { head: Atomic::null() }
     }
 
     /// Inserts `data` into the list.
-    pub fn insert<'scope>(&self, data: T, scope: &'scope Scope) -> Ptr<'scope, Entry<T>> {
-        let mut new = Owned::new(Entry {
+    pub fn insert<'scope>(&'scope self, mut to: &'scope Atomic<Entry<T>>, data: T, scope: &'scope Scope) -> Ptr<'scope, Entry<T>> {
+        let mut cur = Owned::new(Entry {
             data: data,
             next: Atomic::null(),
         });
-        let mut head = self.head.load(Relaxed, scope);
+        let mut next = to.load(Relaxed, scope);
 
         loop {
-            new.next.store(head, Relaxed);
-            match self.head.compare_and_set_weak_owned(head, new, Release, scope) {
-                Ok(n) => return n,
-                Err((h, n)) => {
-                    head = h;
-                    new = n;
+            cur.next.store(next, Relaxed);
+            match to.compare_and_set_weak_owned(next, cur, Release, scope) {
+                Ok(cur) => return cur,
+                Err((n, c)) => {
+                    next = n;
+                    cur = c;
                 }
             }
         }
+    }
+
+    pub fn insert_head<'scope>(&'scope self, data: T, scope: &'scope Scope) -> Ptr<'scope, Entry<T>> {
+        self.insert(&self.head, data, scope)
     }
 
     /// Returns an iterator over all data.
@@ -78,10 +79,9 @@ impl<T> List<T> {
     /// 2. If a datum is deleted during iteration, it may or may not be returned.
     /// 3. Any datum that gets returned may be returned multiple times.
     pub fn iter<'scope>(&'scope self, scope: &'scope Scope) -> Iter<'scope, T> {
-        let head = &self.head;
-        let pred = head;
+        let pred = &self.head;
         let curr = pred.load(Acquire, scope);
-        Iter { scope, head, pred, curr }
+        Iter { scope, pred, curr }
     }
 }
 
@@ -96,27 +96,25 @@ impl<'scope, T> Iterator for Iter<'scope, T> {
                 // This entry was removed. Try unlinking it from the list.
                 let succ = succ.with_tag(0);
 
-                if self.pred
-                    .compare_and_set(self.curr, succ, Release, self.scope)
-                    .is_err()
-                {
-                    // We lost the race to unlink this entry - let's start over from the beginning.
-                    self.pred = self.head;
-                    self.curr = self.pred.load(Acquire, self.scope);
-                    continue;
+                match self.pred.compare_and_set_weak(self.curr, succ, Acquire, self.scope) {
+                    Ok(_) => {
+                        self.curr = succ;
+                    },
+                    Err(c) => {
+                        self.curr = c;
+                    }
                 }
 
                 // FIXME(jeehoonkang): call `drop` for the unlinked entry.
 
-                // Move forward, but don't change the predecessor.
-                self.curr = succ;
-            } else {
-                // Move one step forward.
-                self.pred = &c.next;
-                self.curr = succ;
-
-                return Some(&c.data);
+                continue;
             }
+
+            // Move one step forward.
+            self.pred = &c.next;
+            self.curr = succ;
+
+            return Some(&c.data);
         }
 
         // We reached the end of the list.
