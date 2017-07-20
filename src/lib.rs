@@ -1,10 +1,15 @@
 #![cfg_attr(feature = "nightly", feature(const_fn))]
 
-mod atomic;
-mod participant;
-mod registry;
-mod scope;
-mod sync;
+#[macro_use(defer)]
+extern crate scopeguard;
+extern crate boxfnonce;
 
-pub use atomic::{Atomic, CompareAndSetOrdering, Owned, Ptr};
-pub use scope::{Scope, pin, unprotected};
+mod atomic;
+mod garbage;
+mod registry;
+mod global;
+mod scope;
+pub mod sync;
+
+pub use self::atomic::{Atomic, CompareAndSetOrdering, Owned, Ptr};
+pub use self::scope::{Scope, pin, is_pinned, unprotected};

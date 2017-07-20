@@ -3,17 +3,17 @@ use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use {Atomic, Owned, Ptr, Scope};
 
 /// An entry in the linked list.
-pub struct Entry<T> {
+pub struct ListEntry<T> {
     /// The data in the entry.
     data: T,
 
     /// The next entry in the linked list.
     /// If the tag is 1, this entry is marked as deleted.
-    next: Atomic<Entry<T>>,
+    next: Atomic<ListEntry<T>>,
 }
 
 pub struct List<T> {
-    head: Atomic<Entry<T>>,
+    head: Atomic<ListEntry<T>>,
 }
 
 pub struct Iter<'scope, T: 'scope> {
@@ -21,13 +21,19 @@ pub struct Iter<'scope, T: 'scope> {
     scope: &'scope Scope,
 
     /// Pointer from the predecessor to the current entry.
-    pred: &'scope Atomic<Entry<T>>,
+    pred: &'scope Atomic<ListEntry<T>>,
 
     /// The current entry.
-    curr: Ptr<'scope, Entry<T>>,
+    curr: Ptr<'scope, ListEntry<T>>,
 }
 
-impl<T> Entry<T> {
+pub enum IterResult<'scope, T: 'scope> {
+    Some(&'scope T),
+    None,
+    Abort,
+}
+
+impl<T> ListEntry<T> {
     /// Returns the data in this entry.
     pub fn get(&self) -> &T {
         &self.data
@@ -46,8 +52,8 @@ impl<T> List<T> {
     }
 
     /// Inserts `data` into the list.
-    pub fn insert<'scope>(&'scope self, mut to: &'scope Atomic<Entry<T>>, data: T, scope: &'scope Scope) -> Ptr<'scope, Entry<T>> {
-        let mut cur = Owned::new(Entry {
+    pub fn insert<'scope>(&'scope self, to: &'scope Atomic<ListEntry<T>>, data: T, scope: &'scope Scope) -> Ptr<'scope, ListEntry<T>> {
+        let mut cur = Owned::new(ListEntry {
             data: data,
             next: Atomic::null(),
         });
@@ -65,7 +71,7 @@ impl<T> List<T> {
         }
     }
 
-    pub fn insert_head<'scope>(&'scope self, data: T, scope: &'scope Scope) -> Ptr<'scope, Entry<T>> {
+    pub fn insert_head<'scope>(&'scope self, data: T, scope: &'scope Scope) -> Ptr<'scope, ListEntry<T>> {
         self.insert(&self.head, data, scope)
     }
 
@@ -77,7 +83,7 @@ impl<T> List<T> {
     ///
     /// 1. If a new datum is inserted during iteration, it may or may not be returned.
     /// 2. If a datum is deleted during iteration, it may or may not be returned.
-    /// 3. Any datum that gets returned may be returned multiple times.
+    /// 3. It may not return all data if a concurrent thread continues to iterate the same list.
     pub fn iter<'scope>(&'scope self, scope: &'scope Scope) -> Iter<'scope, T> {
         let pred = &self.head;
         let curr = pred.load(Acquire, scope);
@@ -85,10 +91,8 @@ impl<T> List<T> {
     }
 }
 
-impl<'scope, T> Iterator for Iter<'scope, T> {
-    type Item = &'scope T;
-
-    fn next(&mut self) -> Option<Self::Item> {
+impl<'scope, T> Iter<'scope, T> {
+    pub fn next(&mut self) -> IterResult<T> {
         while let Some(c) = unsafe { self.curr.as_ref() } {
             let succ = c.next.load(Acquire, self.scope);
 
@@ -98,14 +102,15 @@ impl<'scope, T> Iterator for Iter<'scope, T> {
 
                 match self.pred.compare_and_set_weak(self.curr, succ, Acquire, self.scope) {
                     Ok(_) => {
+                        unsafe { self.scope.defer_free(self.curr); }
                         self.curr = succ;
                     },
-                    Err(c) => {
-                        self.curr = c;
+                    Err(_) => {
+                        // We lost the race to delete the entry.  Since another thread trying
+                        // to iterate the list has won the race, we return early.
+                        return IterResult::Abort;
                     }
                 }
-
-                // FIXME(jeehoonkang): call `drop` for the unlinked entry.
 
                 continue;
             }
@@ -114,10 +119,10 @@ impl<'scope, T> Iterator for Iter<'scope, T> {
             self.pred = &c.next;
             self.curr = succ;
 
-            return Some(&c.data);
+            return IterResult::Some(&c.data);
         }
 
         // We reached the end of the list.
-        None
+        IterResult::None
     }
 }
