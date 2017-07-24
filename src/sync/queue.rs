@@ -33,3 +33,9 @@ impl<T> Queue<T> {
         unimplemented!()
     }
 }
+
+impl<T> Default for Queue<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}

@@ -1,10 +1,22 @@
 use std::cell::{Cell, UnsafeCell};
+use std::sync::atomic::Ordering::Relaxed;
 
 use atomic::Ptr;
-use garbage::{Garbage, Bag};
-use global;
 use registry::Registry;
-use sync::list::ListEntry;
+use epoch::Epoch;
+use garbage::{Garbage, Bag};
+use sync::list::{List, ListEntry};
+use sync::queue::Queue;
+
+
+/// global_epoch() returns a reference to the global epoch.
+lazy_static_null!(pub, global_epoch, Epoch);
+
+/// global_garbages() returns a reference to the global garbage queue, which is lazily initialized.
+lazy_static!(pub, global_garbages, Queue<(usize, Bag)>);
+
+/// global_registries() returns a reference to the head pointer of the list of thread registries.
+lazy_static_null!(pub, global_registries, List<Registry>);
 
 
 /// Number of pinnings after which a thread will collect some global garbage.
@@ -17,7 +29,7 @@ thread_local! {
     /// If initialized, the harness will get destructed on thread exit, which in turn unregisters
     /// the thread.
     static HARNESS: Harness = Harness {
-        registry: Registry::register(),
+        registry: global_registries().register(),
         bag: UnsafeCell::new(Bag::new()),
         is_pinned: Cell::new(false),
         pin_count: Cell::new(0),
@@ -26,7 +38,7 @@ thread_local! {
 
 struct Harness {
     /// This thread's entry in the registry list.
-    registry: *const ListEntry<Registry>,
+    registry: &'static ListEntry<Registry>,
     /// The local garbage objects that will be later freed.
     bag: UnsafeCell<Bag>,
     /// Whether the thread is currently pinned.
@@ -38,21 +50,21 @@ struct Harness {
 impl Drop for Harness {
     fn drop(&mut self) {
         unsafe {
-            let registry = &*self.registry;
             let bag = &mut *self.bag.get();
 
             unprotected_with_bag(bag, |scope| {
                 // Spare some cycles on garbage collection.
                 // Note: This may itself produce garbage and in turn allocate new bags.
-                let epoch = global::try_advance(scope);
-                global::collect(epoch, scope);
+                let epoch = global_epoch().try_advance(global_registries(), scope);
+                global_garbages().collect(epoch, scope);
 
                 // Unregister the thread by marking this entry as deleted.
-                registry.delete(scope);
+                self.registry.delete(scope);
             });
 
             // Push the local bag into the global garbage queue.
-            global::migrate_bag(bag);
+            let epoch = global_epoch().load(Relaxed);
+            global_garbages().migrate_bag(epoch, bag);
         }
     }
 }
@@ -72,7 +84,8 @@ impl Scope {
         let bag = self.get_bag();
 
         while let Err(g) = bag.try_insert(garbage) {
-            global::migrate_bag(bag);
+            let epoch = global_epoch().load(Relaxed);
+            global_garbages().migrate_bag(epoch, bag);
             garbage = g;
         }
     }
@@ -96,13 +109,14 @@ impl Scope {
         unsafe {
             let bag = self.get_bag();
             if bag.is_empty() { return; }
-            global::migrate_bag(bag);
+            let epoch = global_epoch().load(Relaxed);
+            global_garbages().migrate_bag(epoch, bag);
         }
 
         // Spare some cycles on garbage collection.
         // Note: This may itself produce garbage and allocate new bags.
-        let epoch = global::try_advance(self);
-        global::collect(epoch, self);
+        let epoch = global_epoch().try_advance(global_registries(), self);
+        global_garbages().collect(epoch, self);
     }
 }
 
@@ -128,14 +142,15 @@ pub fn pin<F, R>(f: F) -> R
     where F: FnOnce(&Scope) -> R,
 {
     HARNESS.with(|harness| {
-        let registry = unsafe { (&*harness.registry).get() };
+        let registry = harness.registry.get();
         let scope = &Scope { bag: harness.bag.get() };
 
         let was_pinned = harness.is_pinned.get();
         if !was_pinned {
             // Pin the thread.
             harness.is_pinned.set(true);
-            registry.set_pinned(scope);
+            let epoch = global_epoch().load(Relaxed);
+            registry.set_pinned(epoch, scope);
 
             // Increment the pin counter.
             let count = harness.pin_count.get();
@@ -143,8 +158,8 @@ pub fn pin<F, R>(f: F) -> R
 
             // If the counter progressed enough, try advancing the epoch and collecting garbage.
             if count % PINS_BETWEEN_COLLECT == 0 {
-                let epoch = global::try_advance(scope);
-                global::collect(epoch, scope);
+                let epoch = global_epoch().try_advance(global_registries(), scope);
+                global_garbages().collect(epoch, scope);
             }
         }
 
@@ -180,6 +195,6 @@ pub unsafe fn unprotected<F, R>(f: F) -> R
 {
     let mut bag = Bag::new();
     let result = unprotected_with_bag(&mut bag, f);
-    global::migrate_bag(&mut bag);
+    drop(bag); // 
     result
 }

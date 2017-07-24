@@ -4,10 +4,12 @@
 extern crate scopeguard;
 extern crate boxfnonce;
 
+#[macro_use]
+mod lazy_static;
 mod atomic;
-mod garbage;
 mod registry;
-mod global;
+mod epoch;
+mod garbage;
 mod scope;
 pub mod sync;
 

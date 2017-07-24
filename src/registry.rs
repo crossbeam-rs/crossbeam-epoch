@@ -2,7 +2,6 @@ use std::sync::atomic::{AtomicUsize, ATOMIC_USIZE_INIT};
 use std::sync::atomic::Ordering::{Relaxed, Release, SeqCst};
 
 use garbage::Bag;
-use global;
 use scope::{self, Scope};
 use sync::list::{List, ListEntry};
 
@@ -17,26 +16,9 @@ impl Registry {
     // to implement in a lock-free manner. However, traversal is rather slow due to cache misses and
     // data dependencies. We should experiment with other data structures as well.
 
-    /// Returns a reference to the head pointer of the list of thread registries.
     #[inline]
-    pub fn list() -> &'static List<Registry> {
-        static REGISTRIES: AtomicUsize = ATOMIC_USIZE_INIT;
-        unsafe { &*(&REGISTRIES as *const AtomicUsize as *const List<Registry>) }
-    }
-
-    #[inline]
-    pub fn register() -> *const ListEntry<Self> {
-        let list = Self::list();
-        let registry = Registry { state: AtomicUsize::new(0) };
-
-        // Since we don't dereference any pointers in this block, it's okay to use `unprotected`.
-        // Also, we use an invalid bag since no garbages are created in list insertion.
-        unsafe {
-            let mut bag = ::std::mem::zeroed::<Bag>();
-            scope::unprotected_with_bag(&mut bag, |scope| {
-                list.insert_head(registry, scope).as_raw()
-            })
-        }
+    pub fn new() -> Self {
+        Registry { state: ATOMIC_USIZE_INIT }
     }
 
     #[inline]
@@ -49,8 +31,7 @@ impl Registry {
     ///
     /// Must not be called if the thread is already pinned!
     #[inline]
-    pub fn set_pinned(&self, _scope: &Scope) {
-        let epoch = global::EPOCH.load(Relaxed);
+    pub fn set_pinned(&self, epoch: usize, _scope: &Scope) {
         let state = epoch | 1;
 
         // Now we must store `state` into `self.state`. It's important that any succeeding loads
@@ -77,5 +58,19 @@ impl Registry {
         // Clear the last bit.
         // We don't need to preserve the epoch, so just store the number zero.
         self.state.store(0, Release);
+    }
+}
+
+impl List<Registry> {
+    #[inline]
+    pub fn register<'scope>(&self) -> &'scope ListEntry<Registry> {
+        // Since we don't dereference any pointers in this block, it's okay to use `unprotected`.
+        // Also, we use an invalid bag since no garbages are created in list insertion.
+        unsafe {
+            let mut bag = ::std::mem::zeroed::<Bag>();
+            scope::unprotected_with_bag(&mut bag, |scope| {
+                &*self.insert_head(Registry::new(), scope).as_raw()
+            })
+        }
     }
 }

@@ -1,5 +1,39 @@
+//! Garbage collection.
+//!
+//! # Garbages
+//!
+//! TODO
+//!
+//! # Bags
+//!
+//! Objects that get unlinked from concurrent data structures must be stashed away until the global
+//! epoch sufficiently advances so that they become safe for destruction.  For that purposes, each
+//! thread has a thread-local bag that is populated with pointers to such garbage objects, and when
+//! it becomes full, the bag is marked with the current global epoch and pushed into a global queue
+//! of garbage bags.
+//!
+//! # Garbage queues
+//!
+//! Whenever a bag is pushed into a queue, some garbage in the queue is collected and destroyed
+//! along the way.  Garbage collection can also be manually triggered by calling `collect()`.  This
+//! design reduces contention on data structures.  Ideally each instance of concurrent data
+//! structure may have it's own queue that gets fully destroyed as soon as the data structure gets
+//! dropped.
+//!
+//! # The global garbage bag queue
+//!
+//! However, some data structures don't own objects but merely transfer them between threads,
+//! e.g. queues.  As such, queues don't execute destructors - they only allocate and free some
+//! memory. it would be costly for each queue to handle it's own queue, so there is a special global
+//! queue all data structures can share.
+
+use std::cmp;
 use std::mem;
 use boxfnonce::SendBoxFnOnce;
+use std::sync::atomic::Ordering::SeqCst;
+
+use scope::Scope;
+use sync::queue::Queue;
 
 
 /// Maximum number of objects a bag can contain.
@@ -7,6 +41,9 @@ use boxfnonce::SendBoxFnOnce;
 const MAX_OBJECTS: usize = 64;
 #[cfg(feature = "strict_gc")]
 const MAX_OBJECTS: usize = 4;
+
+/// Number of bags to destroy.
+const COLLECT_STEPS: usize = 8;
 
 
 pub enum Garbage {
@@ -48,9 +85,9 @@ impl Garbage {
     ///
     /// Note: The object must be `Send + 'self`.
     pub fn new_drop<T>(object: *mut T, size: usize) -> Self {
-        unsafe fn destruct<T>(ptr: *mut T, size: usize) {
+        unsafe fn destruct<T>(object: *mut T, size: usize) {
             // Run the destructors and free the memory.
-            drop(Vec::from_raw_parts(ptr, size, size));
+            drop(Vec::from_raw_parts(object, size, size));
         }
         Self::new_destroy(object, size, destruct)
     }
@@ -106,7 +143,7 @@ impl Bag {
 
         self.objects[self.len] = garbage;
         self.len += 1;
-        return Ok(());
+        Ok(())
     }
 }
 
@@ -115,5 +152,31 @@ impl Drop for Bag {
         for garbage in self.objects.into_iter().take(self.len) {
             drop(garbage)
         }
+    }
+}
+
+impl Queue<(usize, Bag)> {
+    /// Collects several bags from the global old garbage queue and destroys their objects.
+    pub fn collect(&self, epoch: usize, scope: &Scope) {
+        let condition = |bag: &(usize, Bag)| {
+            // A pinned thread can witness at most one epoch advancement. Therefore, any bag that is
+            // within one epoch of the current one cannot be destroyed yet.
+            let diff = epoch.wrapping_sub(bag.0);
+            cmp::min(diff, 0usize.wrapping_sub(diff)) > 2
+        };
+
+        for _ in 0..COLLECT_STEPS {
+            match self.try_pop_if(&condition, scope) {
+                None => break,
+                Some(bag) => drop(bag)
+            }
+        }
+    }
+
+    /// Migrates garbages to the global queues.
+    pub fn migrate_bag(&self, epoch: usize, bag: &mut Bag) {
+        let bag = ::std::mem::replace(bag, Bag::new());
+        ::std::sync::atomic::fence(SeqCst);
+        self.push((epoch, bag));
     }
 }
