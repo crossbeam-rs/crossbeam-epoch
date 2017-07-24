@@ -9,7 +9,7 @@
 
 use std::marker::PhantomData;
 
-use {Namespace, Scope};
+use {Namespace, Scope, unprotected};
 
 
 pub struct Queue<T> {
@@ -38,5 +38,16 @@ impl<T> Queue<T> {
 impl<T> Default for Queue<T> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl<T> Drop for Queue<T> {
+    fn drop(&mut self) {
+        unsafe {
+            unprotected(|scope| {
+                while let Some(_) = self.try_pop(scope) {
+                }
+            })
+        }
     }
 }

@@ -1,6 +1,6 @@
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 
-use {Atomic, Owned, Ptr, Namespace, Scope};
+use {Atomic, Owned, Ptr, Namespace, Scope, unprotected};
 
 
 /// An entry in the linked list.
@@ -89,6 +89,21 @@ impl<T> List<T> {
         let pred = &self.head;
         let curr = pred.load(Acquire, scope);
         Iter { scope, pred, curr }
+    }
+}
+
+impl<T> Drop for List<T> {
+    fn drop(&mut self) {
+        unsafe {
+            unprotected(|scope| {
+                let mut curr = self.head.load(Relaxed, scope);
+                while let Some(c) = curr.as_ref() {
+                    let succ = c.next.load(Relaxed, scope);
+                    scope.defer_free(curr);
+                    curr = succ;
+                }
+            })
+        }
     }
 }
 
