@@ -41,7 +41,7 @@ impl Registry {
 
     #[inline]
     pub fn get_state(&self) -> (bool, usize) {
-        let state = self.state.load(SeqCst);
+        let state = self.state.load(Relaxed);
         ((state & 1) == 1, state & !1)
     }
 

@@ -1,5 +1,6 @@
+use std::cmp;
 use std::sync::atomic::{AtomicUsize, ATOMIC_USIZE_INIT};
-use std::sync::atomic::Ordering::{Acquire, Release, SeqCst};
+use std::sync::atomic::Ordering::{Relaxed, Acquire, Release, SeqCst};
 
 use garbage::Bag;
 use registry::Registry;
@@ -23,7 +24,8 @@ pub static EPOCH: AtomicUsize = ATOMIC_USIZE_INIT;
 /// Returns the current global epoch.
 #[cold]
 pub fn try_advance(scope: &Scope) -> usize {
-    let epoch = EPOCH.load(SeqCst);
+    let epoch = EPOCH.load(Relaxed);
+    ::std::sync::atomic::fence(SeqCst);
 
     // Traverse the linked list of thread registries.
     let mut registries = Registry::list().iter(scope);
@@ -46,26 +48,28 @@ pub fn try_advance(scope: &Scope) -> usize {
             }
         }
     }
+    ::std::sync::atomic::fence(Acquire);
 
     // All pinned threads were pinned in the current global epoch.
     // Try advancing the epoch. We increment by 2 and simply wrap around on overflow.
-    let epoch_new = EPOCH.compare_and_swap(epoch, epoch.wrapping_add(2), SeqCst);
-
-    // If EPOCH is updated, adjust the global garbage queues.
-    if epoch_new == epoch {
-        garbages_old().append(garbages_cur());
-        garbages_cur().append(garbages_new());
-    }
-
+    let epoch_new = epoch.wrapping_add(2);
+    EPOCH.store(epoch_new, Release);
     epoch_new
 }
 
 /// Collects several bags from the global old garbage queue and destroys their objects.
-pub fn collect(scope: &Scope) {
-    let queue = garbages_old();
+pub fn collect(epoch: usize, scope: &Scope) {
+    let queue = garbages();
+
+    let condition = |bag: &(usize, Bag)| {
+        // A pinned thread can witness at most one epoch advancement. Therefore, any bag that is
+        // within one epoch of the current one cannot be destroyed yet.
+        let diff = epoch.wrapping_sub(bag.0);
+        cmp::min(diff, 0usize.wrapping_sub(diff)) > 2
+    };
 
     for _ in 0..COLLECT_STEPS {
-        match queue.try_pop(scope) {
+        match queue.try_pop_if(&condition, scope) {
             None => break,
             Some(bag) => drop(bag)
         }
@@ -75,50 +79,34 @@ pub fn collect(scope: &Scope) {
 /// Migrates garbages to the global queues.
 pub fn migrate_bag(bag: &mut Bag) {
     let bag = ::std::mem::replace(bag, Bag::new());
-    garbages_new().push(bag);
+    let epoch = EPOCH.load(Relaxed);
+    ::std::sync::atomic::fence(SeqCst);
+    garbages().push((epoch, bag));
 }
 
+/// Returns a reference to the global garbage queue, which is lazily initialized.
+fn garbages() -> &'static Queue<(usize, Bag)> {
+    static GLOBAL: AtomicUsize = ATOMIC_USIZE_INIT;
 
-/// A macro for the global garbage queues.
-macro_rules! garbages {
-    () => ({
-        static GLOBAL: AtomicUsize = ATOMIC_USIZE_INIT;
+    let current = GLOBAL.load(Acquire);
 
-        let current = GLOBAL.load(Acquire);
+    let garbage = if current == 0 {
+        // Initialize the singleton.
+        let raw = Box::into_raw(Box::new(Queue::<(usize, Bag)>::new()));
+        let new = raw as usize;
+        let previous = GLOBAL.compare_and_swap(0, new, Release);
 
-        let garbage = if current == 0 {
-            // Initialize the singleton.
-            let raw = Box::into_raw(Box::new(Queue::<Bag>::new()));
-            let new = raw as usize;
-            let previous = GLOBAL.compare_and_swap(0, new, Release);
-
-            if previous == 0 {
-                // Ok, we initialized it.
-                new
-            } else {
-                // Another thread has already initialized it.
-                unsafe { drop(Box::from_raw(raw)); }
-                previous
-            }
+        if previous == 0 {
+            // Ok, we initialized it.
+            new
         } else {
-            current
-        };
+            // Another thread has already initialized it.
+            unsafe { drop(Box::from_raw(raw)); }
+            previous
+        }
+    } else {
+        current
+    };
 
-        unsafe { &*(garbage as *const Queue<Bag>) }
-    });
-}
-
-/// Returns a reference to the old global garbage queue, which is lazily initialized.
-fn garbages_old() -> &'static Queue<Bag> {
-    garbages!()
-}
-
-/// Returns a reference to the current global garbage queue, which is lazily initialized.
-fn garbages_cur() -> &'static Queue<Bag> {
-    garbages!()
-}
-
-/// Returns a reference to the new global garbage queue, which is lazily initialized.
-fn garbages_new() -> &'static Queue<Bag> {
-    garbages!()
+    unsafe { &*(garbage as *const Queue<(usize, Bag)>) }
 }

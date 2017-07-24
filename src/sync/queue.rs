@@ -28,7 +28,8 @@ impl<T> Queue<T> {
         unimplemented!()
     }
 
-    pub fn append(&self, other: &Queue<T>) {
+    pub fn try_pop_if<F>(&self, condition: F, scope: &Scope) -> Option<T>
+        where F: Fn(&T) -> bool {
         unimplemented!()
     }
 }

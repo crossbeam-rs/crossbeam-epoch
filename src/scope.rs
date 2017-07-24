@@ -44,8 +44,8 @@ impl Drop for Harness {
             unprotected_with_bag(bag, |scope| {
                 // Spare some cycles on garbage collection.
                 // Note: This may itself produce garbage and in turn allocate new bags.
-                global::try_advance(scope);
-                global::collect(scope);
+                let epoch = global::try_advance(scope);
+                global::collect(epoch, scope);
 
                 // Unregister the thread by marking this entry as deleted.
                 registry.delete(scope);
@@ -101,8 +101,8 @@ impl Scope {
 
         // Spare some cycles on garbage collection.
         // Note: This may itself produce garbage and allocate new bags.
-        global::try_advance(self);
-        global::collect(self);
+        let epoch = global::try_advance(self);
+        global::collect(epoch, self);
     }
 }
 
@@ -143,8 +143,8 @@ pub fn pin<F, R>(f: F) -> R
 
             // If the counter progressed enough, try advancing the epoch and collecting garbage.
             if count % PINS_BETWEEN_COLLECT == 0 {
-                global::try_advance(scope);
-                global::collect(scope);
+                let epoch = global::try_advance(scope);
+                global::collect(epoch, scope);
             }
         }
 
