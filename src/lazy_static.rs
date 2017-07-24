@@ -2,14 +2,15 @@
 #[macro_export]
 macro_rules! lazy_static {
     ($VISIBILITY:tt, $NAME:ident, $T:ty, $init:expr) => {
-        #[inline]
-        $VISIBILITY fn $NAME() -> &'static $T {
+        $VISIBILITY mod $NAME {
             use ::std::sync::atomic::{AtomicUsize, ATOMIC_USIZE_INIT};
-            use ::std::sync::atomic::Ordering::{Acquire, Release};
+            use ::std::sync::atomic::Ordering::{Relaxed, Acquire, Release};
+            use super::*;
 
             static GLOBAL: AtomicUsize = ATOMIC_USIZE_INIT;
 
-            fn get() -> usize {
+            #[inline]
+            fn get_raw() -> usize {
                 let current = GLOBAL.load(Acquire);
                 if current != 0 {
                     return current;
@@ -30,7 +31,15 @@ macro_rules! lazy_static {
                 }
             }
 
-            unsafe { &*(get() as *const $T) }
+            #[inline]
+            pub fn get() -> &'static $T {
+                unsafe { &*(get_raw() as *const $T) }
+            }
+
+            #[inline]
+            pub unsafe fn get_unsafe() -> &'static $T {
+                &*(GLOBAL.load(Relaxed) as *const $T)
+            }
         }
     };
     ($VISIBILITY:tt, $NAME:ident, $T:ty) => {

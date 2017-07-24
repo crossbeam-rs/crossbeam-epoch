@@ -1,6 +1,7 @@
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 
-use {Atomic, Owned, Ptr, Scope};
+use {Atomic, Owned, Ptr, Namespace, Scope};
+
 
 /// An entry in the linked list.
 pub struct ListEntry<T> {
@@ -16,9 +17,9 @@ pub struct List<T> {
     head: Atomic<ListEntry<T>>,
 }
 
-pub struct Iter<'scope, T: 'scope> {
+pub struct Iter<'scope, N: Namespace + 'scope, T: 'scope> {
     /// The scope in which the iterator is operating.
-    scope: &'scope Scope,
+    scope: &'scope Scope<N>,
 
     /// Pointer from the predecessor to the current entry.
     pred: &'scope Atomic<ListEntry<T>>,
@@ -40,7 +41,7 @@ impl<T> ListEntry<T> {
     }
 
     /// Marks this entry as deleted.
-    pub fn delete(&self, scope: &Scope) {
+    pub fn delete<N: Namespace>(&self, scope: &Scope<N>) {
         self.next.fetch_or(1, Release, scope);
     }
 }
@@ -52,7 +53,7 @@ impl<T> List<T> {
     }
 
     /// Inserts `data` into the list.
-    pub fn insert<'scope>(&'scope self, to: &'scope Atomic<ListEntry<T>>, data: T, scope: &'scope Scope) -> Ptr<'scope, ListEntry<T>> {
+    pub fn insert<'scope, N: Namespace>(&'scope self, to: &'scope Atomic<ListEntry<T>>, data: T, scope: &'scope Scope<N>) -> Ptr<'scope, ListEntry<T>> {
         let mut cur = Owned::new(ListEntry {
             data: data,
             next: Atomic::null(),
@@ -71,7 +72,7 @@ impl<T> List<T> {
         }
     }
 
-    pub fn insert_head<'scope>(&'scope self, data: T, scope: &'scope Scope) -> Ptr<'scope, ListEntry<T>> {
+    pub fn insert_head<'scope, N: Namespace>(&'scope self, data: T, scope: &'scope Scope<N>) -> Ptr<'scope, ListEntry<T>> {
         self.insert(&self.head, data, scope)
     }
 
@@ -84,14 +85,14 @@ impl<T> List<T> {
     /// 1. If a new datum is inserted during iteration, it may or may not be returned.
     /// 2. If a datum is deleted during iteration, it may or may not be returned.
     /// 3. It may not return all data if a concurrent thread continues to iterate the same list.
-    pub fn iter<'scope>(&'scope self, scope: &'scope Scope) -> Iter<'scope, T> {
+    pub fn iter<'scope, N: Namespace>(&'scope self, scope: &'scope Scope<N>) -> Iter<'scope, N, T> where {
         let pred = &self.head;
         let curr = pred.load(Acquire, scope);
         Iter { scope, pred, curr }
     }
 }
 
-impl<'scope, T> Iter<'scope, T> {
+impl<'scope, N: Namespace, T> Iter<'scope, N, T> {
     pub fn next(&mut self) -> IterResult<T> {
         while let Some(c) = unsafe { self.curr.as_ref() } {
             let succ = c.next.load(Acquire, self.scope);

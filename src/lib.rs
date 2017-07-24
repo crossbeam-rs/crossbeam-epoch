@@ -11,7 +11,11 @@ mod registry;
 mod epoch;
 mod garbage;
 mod scope;
+mod global;
+mod local;
 pub mod sync;
 
 pub use self::atomic::{Atomic, CompareAndSetOrdering, Owned, Ptr};
-pub use self::scope::{Scope, pin, is_pinned, unprotected};
+pub use self::scope::{Namespace, Agent, Scope};
+pub use self::global::{pin, is_pinned, unprotected};
+pub use self::local::LocalNamespace;

@@ -9,7 +9,8 @@
 
 use std::marker::PhantomData;
 
-use {Scope};
+use {Namespace, Scope};
+
 
 pub struct Queue<T> {
     _marker: PhantomData<T>,
@@ -24,11 +25,11 @@ impl<T> Queue<T> {
         unimplemented!()
     }
 
-    pub fn try_pop(&self, scope: &Scope) -> Option<T> {
+    pub fn try_pop<N: Namespace>(&self, scope: &Scope<N>) -> Option<T> {
         unimplemented!()
     }
 
-    pub fn try_pop_if<F>(&self, condition: F, scope: &Scope) -> Option<T>
+    pub fn try_pop_if<F, N: Namespace>(&self, condition: F, scope: &Scope<N>) -> Option<T>
         where F: Fn(&T) -> bool {
         unimplemented!()
     }

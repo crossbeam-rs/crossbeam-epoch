@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicUsize, ATOMIC_USIZE_INIT};
 use std::sync::atomic::Ordering::{Relaxed, Acquire, Release, SeqCst};
 
 use registry::Registry;
-use scope::Scope;
+use scope::{Namespace, Scope};
 use sync::list::{List, IterResult};
 
 
@@ -23,7 +23,7 @@ impl Epoch {
     ///
     /// Returns the current global epoch.
     #[cold]
-    pub fn try_advance(&self, registries: &List<Registry>, scope: &Scope) -> usize {
+    pub fn try_advance<N: Namespace>(&self, registries: &List<Registry>, scope: &Scope<N>) -> usize {
         let epoch = self.epoch.load(Relaxed);
         ::std::sync::atomic::fence(SeqCst);
 

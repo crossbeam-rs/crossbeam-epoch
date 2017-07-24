@@ -2,7 +2,7 @@
 //!
 //! # Garbages
 //!
-//! TODO
+//! FIXME(jeehoonkang): fill it
 //!
 //! # Bags
 //!
@@ -32,7 +32,7 @@ use std::mem;
 use boxfnonce::SendBoxFnOnce;
 use std::sync::atomic::Ordering::SeqCst;
 
-use scope::Scope;
+use scope::{Namespace, Scope};
 use sync::queue::Queue;
 
 
@@ -157,7 +157,7 @@ impl Drop for Bag {
 
 impl Queue<(usize, Bag)> {
     /// Collects several bags from the global old garbage queue and destroys their objects.
-    pub fn collect(&self, epoch: usize, scope: &Scope) {
+    pub fn collect<N: Namespace>(&self, epoch: usize, scope: &Scope<N>) {
         let condition = |bag: &(usize, Bag)| {
             // A pinned thread can witness at most one epoch advancement. Therefore, any bag that is
             // within one epoch of the current one cannot be destroyed yet.

@@ -2,7 +2,8 @@ use std::sync::atomic::{AtomicUsize, ATOMIC_USIZE_INIT};
 use std::sync::atomic::Ordering::{Relaxed, Release, SeqCst};
 
 use garbage::Bag;
-use scope::{self, Scope};
+use scope::{Namespace, Scope};
+use global;
 use sync::list::{List, ListEntry};
 
 pub struct Registry {
@@ -31,7 +32,7 @@ impl Registry {
     ///
     /// Must not be called if the thread is already pinned!
     #[inline]
-    pub fn set_pinned(&self, epoch: usize, _scope: &Scope) {
+    pub fn set_pinned<N: Namespace>(&self, epoch: usize, _: &Scope<N>) {
         let state = epoch | 1;
 
         // Now we must store `state` into `self.state`. It's important that any succeeding loads
@@ -68,7 +69,7 @@ impl List<Registry> {
         // Also, we use an invalid bag since no garbages are created in list insertion.
         unsafe {
             let mut bag = ::std::mem::zeroed::<Bag>();
-            scope::unprotected_with_bag(&mut bag, |scope| {
+            global::unprotected_with_bag(&mut bag, |scope| {
                 &*self.insert_head(Registry::new(), scope).as_raw()
             })
         }
