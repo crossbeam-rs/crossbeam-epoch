@@ -216,7 +216,9 @@ impl<T> Atomic<T> {
     ///     let p = a.load(SeqCst, scope);
     /// });
     /// ```
-    pub fn load<'scope, N: Namespace>(&self, ord: Ordering, _: &'scope Scope<N>) -> Ptr<'scope, T> {
+    pub fn load<'scope, N>(&self, ord: Ordering, _: &'scope Scope<N>) -> Ptr<'scope, T> where
+        N: Namespace + 'scope,
+    {
         Ptr::from_data(self.data.load(ord))
     }
 
@@ -280,7 +282,9 @@ impl<T> Atomic<T> {
     ///     let p = a.swap(Ptr::null(), SeqCst, scope);
     /// });
     /// ```
-    pub fn swap<'scope, N: Namespace>(&self, new: Ptr<T>, ord: Ordering, _: &'scope Scope<N>) -> Ptr<'scope, T> {
+    pub fn swap<'scope, N>(&self, new: Ptr<T>, ord: Ordering, _: &'scope Scope<N>) -> Ptr<'scope, T> where
+        N: Namespace + 'scope,
+    {
         Ptr::from_data(self.data.swap(new.data, ord))
     }
 
@@ -519,7 +523,9 @@ impl<T> Atomic<T> {
     ///     assert_eq!(a.load(SeqCst, scope).tag(), 2);
     /// });
     /// ```
-    pub fn fetch_and<'scope, N: Namespace>(&self, val: usize, ord: Ordering, _: &'scope Scope<N>) -> Ptr<'scope, T> {
+    pub fn fetch_and<'scope, N>(&self, val: usize, ord: Ordering, _: &'scope Scope<N>) -> Ptr<'scope, T> where
+        N: Namespace + 'scope,
+    {
         validate_tag::<T>(val);
         Ptr::from_data(self.data.fetch_and(val, ord))
     }
@@ -546,7 +552,9 @@ impl<T> Atomic<T> {
     ///     assert_eq!(a.load(SeqCst, scope).tag(), 3);
     /// });
     /// ```
-    pub fn fetch_or<'scope, N: Namespace>(&self, val: usize, ord: Ordering, _: &'scope Scope<N>) -> Ptr<'scope, T> {
+    pub fn fetch_or<'scope, N>(&self, val: usize, ord: Ordering, _: &'scope Scope<N>) -> Ptr<'scope, T> where
+        N: Namespace + 'scope,
+    {
         validate_tag::<T>(val);
         Ptr::from_data(self.data.fetch_or(val, ord))
     }
@@ -573,7 +581,9 @@ impl<T> Atomic<T> {
     ///     assert_eq!(a.load(SeqCst, scope).tag(), 2);
     /// });
     /// ```
-    pub fn fetch_xor<'scope, N: Namespace>(&self, val: usize, ord: Ordering, _: &'scope Scope<N>) -> Ptr<'scope, T> {
+    pub fn fetch_xor<'scope, N>(&self, val: usize, ord: Ordering, _: &'scope Scope<N>) -> Ptr<'scope, T> where
+        N: Namespace + 'scope,
+    {
         validate_tag::<T>(val);
         Ptr::from_data(self.data.fetch_xor(val, ord))
     }
@@ -696,7 +706,9 @@ impl<T> Owned<T> {
     /// ```
     ///
     /// [`Ptr`]: struct.Ptr.html
-    pub fn into_ptr<'scope, N: Namespace>(self, _: &'scope Scope<N>) -> Ptr<'scope, T> {
+    pub fn into_ptr<'scope, N>(self, _: &'scope Scope<N>) -> Ptr<'scope, T> where
+        N: Namespace + 'scope,
+    {
         let data = self.data;
         mem::forget(self);
         Ptr::from_data(data)

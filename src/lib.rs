@@ -12,10 +12,12 @@ mod epoch;
 mod garbage;
 mod scope;
 mod global;
-mod local;
+mod user;
 pub mod sync;
+pub mod cache_padded;
+pub mod scoped;
 
 pub use self::atomic::{Atomic, CompareAndSetOrdering, Owned, Ptr};
 pub use self::scope::{Namespace, Agent, Scope};
-pub use self::global::{pin, is_pinned, unprotected};
-pub use self::local::LocalNamespace;
+pub use self::global::{pin, is_pinned, unprotected, GlobalNamespace};
+pub use self::user::UserNamespace;

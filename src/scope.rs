@@ -1,34 +1,68 @@
+use std::cmp;
 use std::cell::{Cell, UnsafeCell};
-use std::sync::atomic::Ordering::Relaxed;
+use std::sync::atomic::Ordering::{Relaxed, SeqCst};
 
 use atomic::Ptr;
 use registry::Registry;
 use epoch::Epoch;
 use garbage::{Garbage, Bag};
-use global;
 
 use sync::list::{List, ListEntry};
-use sync::queue::Queue;
+use sync::ms_queue::MsQueue;
 
 
 /// Number of pinnings after which a thread will collect some global garbage.
 const PINS_BETWEEN_COLLECT: usize = 128;
 
+/// Number of bags to destroy.
+const COLLECT_STEPS: usize = 8;
+
 
 pub trait Namespace: Copy {
     fn epoch(&self) -> &Epoch;
-    fn garbages(&self) -> &Queue<(usize, Bag)>;
+    fn garbages(&self) -> &MsQueue<Self, (usize, Bag)>;
     fn registries(&self) -> &List<Registry>;
 
-    unsafe fn unprotected_with_bag<F, R>(self, bag: &mut Bag, f: F) -> R
-        where F: FnOnce(&Scope<Self>) -> R,
+    #[inline]
+    fn push_bag<'scope>(self, bag: &mut Bag, scope: &'scope Scope<Self>) {
+        let epoch = self.epoch().load(Relaxed);
+        let bag = ::std::mem::replace(bag, Bag::new());
+        ::std::sync::atomic::fence(SeqCst);
+        self.garbages().push((epoch, bag), scope);
+    }
+
+    /// Collect several bags from the global old garbage queue and destroys their objects.
+    /// Note: This may itself produce garbage and in turn allocate new bags.
+    #[inline]
+    fn collect<'scope>(self, scope: &'scope Scope<Self>) {
+        let epoch = self.epoch().try_advance(self.registries(), scope);
+        let garbages = self.garbages();
+        let condition = |bag: &(usize, Bag)| {
+            // A pinned thread can witness at most one epoch advancement. Therefore, any bag that is
+            // within one epoch of the current one cannot be destroyed yet.
+            let diff = epoch.wrapping_sub(bag.0);
+            cmp::min(diff, 0usize.wrapping_sub(diff)) > 2
+        };
+
+        for _ in 0..COLLECT_STEPS {
+            match garbages.try_pop_if(&condition, scope) {
+                None => break,
+                Some(bag) => drop(bag)
+            }
+        }
+    }
+
+    #[inline]
+    unsafe fn unprotected_with_bag<F, R>(self, bag: &mut Bag, f: F) -> R where
+        F: FnOnce(&Scope<Self>) -> R,
     {
         let scope = &Scope { namespace: self, bag: bag };
         f(scope)
     }
 
-    unsafe fn unprotected<F, R>(self, f: F) -> R
-        where F: FnOnce(&Scope<Self>) -> R,
+    #[inline]
+    unsafe fn unprotected<F, R>(self, f: F) -> R where
+        F: FnOnce(&Scope<Self>) -> R,
     {
         let mut bag = Bag::new();
         let result = self.unprotected_with_bag(&mut bag, f);
@@ -51,29 +85,9 @@ pub struct Agent<'scope, N: Namespace + 'scope> {
     pin_count: Cell<usize>,
 }
 
-impl<'scope, N: Namespace> Drop for Agent<'scope, N> {
-    fn drop(&mut self) {
-        unsafe {
-            let bag = &mut *self.bag.get();
-
-            global::unprotected_with_bag(bag, |scope| {
-                // Spare some cycles on garbage collection.
-                // Note: This may itself produce garbage and in turn allocate new bags.
-                let epoch = self.namespace.epoch().try_advance(self.namespace.registries(), scope);
-                self.namespace.garbages().collect(epoch, scope);
-
-                // Unregister the thread by marking this entry as deleted.
-                self.registry.delete(scope);
-            });
-
-            // Push the local bag into the global garbage queue.
-            let epoch = self.namespace.epoch().load(Relaxed);
-            self.namespace.garbages().migrate_bag(epoch, bag);
-        }
-    }
-}
-
-impl<'scope, N: Namespace> Agent<'scope, N> {
+impl<'scope, N> Agent<'scope, N> where
+    N: Namespace + 'scope,
+{
     pub fn new(n: N) -> Self {
         Agent {
             namespace: n,
@@ -102,27 +116,25 @@ impl<'scope, N: Namespace> Agent<'scope, N> {
     /// can be used pretty liberally. On a modern machine pinning takes 10 to 15 nanoseconds.
     ///
     /// [`Atomic`]: struct.Atomic.html
-    pub fn pin<F, R>(&self, f: F) -> R
-        where F: FnOnce(&Scope<N>) -> R,
+    pub fn pin<F, R>(&self, f: F) -> R where
+        F: FnOnce(&Scope<N>) -> R,
     {
         let registry = self.registry.get();
         let scope = &Scope { namespace: self.namespace, bag: self.bag.get() };
 
         let was_pinned = self.is_pinned.get();
         if !was_pinned {
-            // Pin the thread.
-            self.is_pinned.set(true);
-            let epoch = self.namespace.epoch().load(Relaxed);
-            registry.set_pinned(epoch);
-
             // Increment the pin counter.
             let count = self.pin_count.get();
             self.pin_count.set(count.wrapping_add(1));
 
+            // Pin the thread.
+            self.is_pinned.set(true);
+            registry.set_pinned(self.namespace);
+
             // If the counter progressed enough, try advancing the epoch and collecting garbage.
             if count % PINS_BETWEEN_COLLECT == 0 {
-                let epoch = self.namespace.epoch().try_advance(self.namespace.registries(), scope);
-                self.namespace.garbages().collect(epoch, scope);
+                self.namespace.collect(scope);
             }
         }
 
@@ -138,8 +150,26 @@ impl<'scope, N: Namespace> Agent<'scope, N> {
         f(scope)
     }
 
-    pub fn is_pinned(&self) -> bool {
+    pub fn is_pinned(&'scope self) -> bool {
         self.is_pinned.get()
+    }
+}
+
+impl<'scope, N: Namespace> Drop for Agent<'scope, N> {
+    fn drop(&mut self) {
+        unsafe {
+            let bag = &mut *self.bag.get();
+
+            self.pin(|scope| {
+                self.namespace.collect(scope);
+
+                // Unregister the thread by marking this entry as deleted.
+                self.registry.delete(scope);
+
+                // Push the local bag into the global garbage queue.
+                self.namespace.push_bag(bag, scope);
+            });
+        }
     }
 }
 
@@ -150,7 +180,9 @@ pub struct Scope<N: Namespace> {
     bag: *mut Bag, // !Send + !Sync
 }
 
-impl<N: Namespace> Scope<N> {
+impl<N> Scope<N> where
+    N: Namespace,
+{
     unsafe fn get_bag(&self) -> &mut Bag {
         &mut *self.bag
     }
@@ -159,8 +191,7 @@ impl<N: Namespace> Scope<N> {
         let bag = self.get_bag();
 
         while let Err(g) = bag.try_insert(garbage) {
-            let epoch = self.namespace.epoch().load(Relaxed);
-            self.namespace.garbages().migrate_bag(epoch, bag);
+            self.namespace.push_bag(bag, self);
             garbage = g;
         }
     }
@@ -183,14 +214,11 @@ impl<N: Namespace> Scope<N> {
     pub fn flush(&self) {
         unsafe {
             let bag = self.get_bag();
-            if bag.is_empty() { return; }
-            let epoch = self.namespace.epoch().load(Relaxed);
-            self.namespace.garbages().migrate_bag(epoch, bag);
+            if !bag.is_empty() {
+                self.namespace.push_bag(bag, self);
+            }
         }
 
-        // Spare some cycles on garbage collection.
-        // Note: This may itself produce garbage and allocate new bags.
-        let epoch = self.namespace.epoch().try_advance(self.namespace.registries(), self);
-        self.namespace.garbages().collect(epoch, self);
+        self.namespace.collect(self);
     }
 }

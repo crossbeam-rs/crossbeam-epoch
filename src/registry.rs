@@ -3,6 +3,7 @@ use std::sync::atomic::Ordering::{Relaxed, Release, SeqCst};
 
 use garbage::Bag;
 use global;
+use scope::Namespace;
 use sync::list::{List, ListEntry};
 
 pub struct Registry {
@@ -31,7 +32,8 @@ impl Registry {
     ///
     /// Must not be called if the thread is already pinned!
     #[inline]
-    pub fn set_pinned(&self, epoch: usize) {
+    pub fn set_pinned<N: Namespace>(&self, namespace: N) {
+        let epoch = namespace.epoch().load(Relaxed);
         let state = epoch | 1;
 
         // Now we must store `state` into `self.state`. It's important that any succeeding loads

@@ -3,7 +3,7 @@ use epoch::Epoch;
 use garbage::Bag;
 use scope::{self, Namespace};
 use sync::list::List;
-use sync::queue::Queue;
+use sync::ms_queue::MsQueue;
 
 
 type Agent = scope::Agent<'static, GlobalNamespace>;
@@ -14,7 +14,7 @@ type Scope = scope::Scope<GlobalNamespace>;
 lazy_static_null!(pub, epoch, Epoch);
 
 /// garbages() returns a reference to the global garbage queue, which is lazily initialized.
-lazy_static!(pub, garbages, Queue<(usize, Bag)>);
+lazy_static!(pub, garbages, MsQueue<GlobalNamespace, (usize, Bag)>, MsQueue::new(GlobalNamespace::new()));
 
 /// registries() returns a reference to the head pointer of the list of thread registries.
 lazy_static_null!(pub, registries, List<Registry>);
@@ -25,6 +25,9 @@ pub struct GlobalNamespace {
 
 impl GlobalNamespace {
     pub fn new() -> Self {
+        epoch();
+        garbages::get();
+        registries();
         GlobalNamespace { }
     }
 }
@@ -34,7 +37,7 @@ impl Namespace for GlobalNamespace {
         epoch()
     }
 
-    fn garbages(&self) -> &Queue<(usize, Bag)> {
+    fn garbages(&self) -> &MsQueue<Self, (usize, Bag)> {
         unsafe { garbages::get_unsafe() }
     }
 
@@ -42,31 +45,6 @@ impl Namespace for GlobalNamespace {
         registries()
     }
 }
-
-thread_local! {
-    /// The thread registration agent.
-    ///
-    /// The agent is lazily initialized on its first use, thus registrating the current thread.
-    /// If initialized, the agent will get destructed on thread exit, which in turn unregisters
-    /// the thread.
-    static AGENT: Agent = {
-        epoch();
-        garbages::get();
-        registries();
-        Agent::new(GlobalNamespace::new())
-    }
-}
-
-pub fn pin<F, R>(f: F) -> R
-    where F: FnOnce(&Scope) -> R,
-{
-    AGENT.with(|agent| { agent.pin(f) })
-}
-
-pub fn is_pinned() -> bool {
-    AGENT.with(|agent| { agent.is_pinned() })
-}
-
 
 pub unsafe fn unprotected_with_bag<F, R>(bag: &mut Bag, f: F) -> R
     where F: FnOnce(&Scope) -> R,
@@ -78,4 +56,26 @@ pub unsafe fn unprotected<F, R>(f: F) -> R
     where F: FnOnce(&Scope) -> R,
 {
     GlobalNamespace::new().unprotected(f)
+}
+
+
+thread_local! {
+    /// The thread registration agent.
+    ///
+    /// The agent is lazily initialized on its first use, thus registrating the current thread.
+    /// If initialized, the agent will get destructed on thread exit, which in turn unregisters
+    /// the thread.
+    static AGENT: Agent = {
+        Agent::new(GlobalNamespace::new())
+    }
+}
+
+pub fn pin<F, R>(f: F) -> R
+    where F: FnOnce(&Scope) -> R,
+{
+    AGENT.with(|agent| agent.pin(f))
+}
+
+pub fn is_pinned() -> bool {
+    AGENT.with(|agent| agent.is_pinned())
 }

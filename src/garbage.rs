@@ -27,13 +27,8 @@
 //! memory. it would be costly for each queue to handle it's own queue, so there is a special global
 //! queue all data structures can share.
 
-use std::cmp;
 use std::mem;
 use boxfnonce::SendBoxFnOnce;
-use std::sync::atomic::Ordering::SeqCst;
-
-use scope::{Namespace, Scope};
-use sync::queue::Queue;
 
 
 /// Maximum number of objects a bag can contain.
@@ -41,9 +36,6 @@ use sync::queue::Queue;
 const MAX_OBJECTS: usize = 64;
 #[cfg(feature = "strict_gc")]
 const MAX_OBJECTS: usize = 4;
-
-/// Number of bags to destroy.
-const COLLECT_STEPS: usize = 8;
 
 
 pub enum Garbage {
@@ -152,31 +144,5 @@ impl Drop for Bag {
         for garbage in self.objects.into_iter().take(self.len) {
             drop(garbage)
         }
-    }
-}
-
-impl Queue<(usize, Bag)> {
-    /// Collects several bags from the global old garbage queue and destroys their objects.
-    pub fn collect<N: Namespace>(&self, epoch: usize, scope: &Scope<N>) {
-        let condition = |bag: &(usize, Bag)| {
-            // A pinned thread can witness at most one epoch advancement. Therefore, any bag that is
-            // within one epoch of the current one cannot be destroyed yet.
-            let diff = epoch.wrapping_sub(bag.0);
-            cmp::min(diff, 0usize.wrapping_sub(diff)) > 2
-        };
-
-        for _ in 0..COLLECT_STEPS {
-            match self.try_pop_if(&condition, scope) {
-                None => break,
-                Some(bag) => drop(bag)
-            }
-        }
-    }
-
-    /// Migrates garbages to the global queues.
-    pub fn migrate_bag(&self, epoch: usize, bag: &mut Bag) {
-        let bag = ::std::mem::replace(bag, Bag::new());
-        ::std::sync::atomic::fence(SeqCst);
-        self.push((epoch, bag));
     }
 }
