@@ -2,7 +2,7 @@ use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 
 use {Atomic, Owned, Ptr, Scope};
 
-/// An entry in the linked list
+/// An entry in the linked list.
 pub struct Entry<T> {
     /// The data in the entry.
     data: T,
@@ -31,20 +31,24 @@ pub struct Iter<'scope, T: 'scope> {
 }
 
 impl<T> Entry<T> {
+    /// Returns the data in this entry.
     pub fn get(&self) -> &T {
         &self.data
     }
 
+    /// Marks this entry as deleted.
     pub fn delete(&self, scope: &Scope) {
         self.next.fetch_or(1, Release, scope);
     }
 }
 
 impl<T> List<T> {
+    /// Returns a new, empty linked list.
     pub fn new() -> List<T> {
         List { head: Atomic::null() }
     }
 
+    /// Inserts `data` into the list.
     pub fn insert<'scope>(&self, data: T, scope: &'scope Scope) -> Ptr<'scope, Entry<T>> {
         let mut new = Owned::new(Entry {
             data: data,
@@ -73,7 +77,7 @@ impl<T> List<T> {
     /// 1. If a new datum is inserted during iteration, it may or may not be returned.
     /// 2. If a datum is deleted during iteration, it may or may not be returned.
     /// 3. Any datum that gets returned may be returned multiple times.
-    pub fn iter<'scope>(&'scope self, scope: &'scope Scope) -> Iter<'scope, T> where {
+    pub fn iter<'scope>(&'scope self, scope: &'scope Scope) -> Iter<'scope, T> {
         let head = &self.head;
         let pred = head;
         let curr = pred.load(Acquire, scope);
@@ -89,7 +93,7 @@ impl<'scope, T> Iterator for Iter<'scope, T> {
             let succ = c.next.load(Acquire, self.scope);
 
             if succ.tag() == 1 {
-                // This data was removed. Try unlinking it from the list.
+                // This entry was removed. Try unlinking it from the list.
                 let succ = succ.with_tag(0);
 
                 if self.pred

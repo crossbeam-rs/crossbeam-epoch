@@ -2,8 +2,8 @@
 
 mod atomic;
 mod participant;
-mod scope;
 mod registry;
+mod scope;
 mod sync;
 
 pub use atomic::{Atomic, CompareAndSetOrdering, Owned, Ptr};

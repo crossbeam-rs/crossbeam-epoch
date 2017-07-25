@@ -15,15 +15,12 @@ thread_local! {
     /// If initialized, the harness will get destructed on thread exit, which in turn unregisters
     /// the thread.
     static HARNESS: Harness = Harness {
-        entry: {
-            let list = participants();
-
-            // Since we don't dereference any pointers in this block, it's okay to use `unprotected`.
-            unsafe {
-                unprotected(|scope| {
-                    list.insert(Participant::new(), scope).as_raw()
-                })
-            }
+        entry: unsafe {
+            // Since we don't dereference any pointers in this block, it's okay to use
+            // `unprotected`.
+            unprotected(|scope| {
+                participants().insert(Participant::new(), scope).as_raw()
+            })
         }
     }
 }
@@ -39,7 +36,7 @@ impl Drop for Harness {
             let entry = &*self.entry;
 
             // Unregister the thread by marking this entry as deleted.
-            unprotected(|scope| { entry.delete(scope); })
+            unprotected(|scope| entry.delete(scope));
         }
     }
 }
