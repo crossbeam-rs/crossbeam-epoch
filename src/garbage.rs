@@ -40,6 +40,7 @@ const MAX_OBJECTS: usize = 4;
 
 pub enum Garbage {
     Destroy { object: *mut u8, size: usize, destroy: unsafe fn(*mut u8, usize), },
+    Free { object: *mut u8, size: usize },
     Fn { f: Option<SendBoxFnOnce<(), ()>>, },
 }
 
@@ -63,11 +64,10 @@ impl Garbage {
     /// The specified object is an array allocated at address `object` and consists of `size`
     /// elements of type `T`.
     pub fn new_free<T>(object: *mut T, size: usize) -> Self {
-        unsafe fn free<T>(object: *mut T, size: usize) {
-            // Free the memory, but don't run the destructors.
-            drop(Vec::from_raw_parts(object, 0, size));
+        Garbage::Free {
+            object: object as *mut u8,
+            size: mem::size_of::<T>() * size,
         }
-        Self::new_destroy(object, size, free)
     }
 
     /// Make a garbage object that will later be dropped and freed.
@@ -95,6 +95,9 @@ impl Drop for Garbage {
         match *self {
             Garbage::Destroy { destroy, object, size } => {
                 unsafe { (destroy)(object, size); }
+            },
+            Garbage::Free { object, size } => {
+                unsafe { drop(Vec::from_raw_parts(object, 0, size)) }
             },
             Garbage::Fn { ref mut f } => {
                 let f = f.take().unwrap();
