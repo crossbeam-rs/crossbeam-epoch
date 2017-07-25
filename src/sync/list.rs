@@ -1,20 +1,23 @@
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 
 use {Atomic, Owned, Ptr, Namespace, Scope, unprotected};
+use util::cache_padded::CachePadded;
 
 
 /// An entry in the linked list.
-pub struct ListEntry<T> {
+struct Node_<T> {
     /// The data in the entry.
     data: T,
 
     /// The next entry in the linked list.
     /// If the tag is 1, this entry is marked as deleted.
-    next: Atomic<ListEntry<T>>,
+    next: Atomic<Node<T>>,
 }
 
+pub struct Node<T>(CachePadded<Node_<T>>);
+
 pub struct List<T> {
-    head: Atomic<ListEntry<T>>,
+    head: Atomic<Node<T>>,
 }
 
 pub struct Iter<'scope, N, T: 'scope> where
@@ -24,10 +27,10 @@ pub struct Iter<'scope, N, T: 'scope> where
     scope: &'scope Scope<N>,
 
     /// Pointer from the predecessor to the current entry.
-    pred: &'scope Atomic<ListEntry<T>>,
+    pred: &'scope Atomic<Node<T>>,
 
     /// The current entry.
-    curr: Ptr<'scope, ListEntry<T>>,
+    curr: Ptr<'scope, Node<T>>,
 }
 
 pub enum IterResult<'scope, T: 'scope> {
@@ -36,17 +39,24 @@ pub enum IterResult<'scope, T: 'scope> {
     Abort,
 }
 
-impl<T> ListEntry<T> {
+impl<T> Node<T> {
     /// Returns the data in this entry.
+    fn new(data: T) -> Self {
+        Node(CachePadded::new(Node_ {
+            data: data,
+            next: Atomic::null(),
+        }))
+    }
+
     pub fn get(&self) -> &T {
-        &self.data
+        &self.0.data
     }
 
     /// Marks this entry as deleted.
     pub fn delete<'scope, N>(&self, scope: &Scope<N>) where
         N: Namespace + 'scope,
     {
-        self.next.fetch_or(1, Release, scope);
+        self.0.next.fetch_or(1, Release, scope);
     }
 }
 
@@ -57,17 +67,14 @@ impl<T> List<T> {
     }
 
     /// Inserts `data` into the list.
-    pub fn insert<'scope, N>(&'scope self, to: &'scope Atomic<ListEntry<T>>, data: T, scope: &'scope Scope<N>) -> Ptr<'scope, ListEntry<T>> where
+    pub fn insert<'scope, N>(&'scope self, to: &'scope Atomic<Node<T>>, data: T, scope: &'scope Scope<N>) -> Ptr<'scope, Node<T>> where
         N: Namespace + 'scope,
     {
-        let mut cur = Owned::new(ListEntry {
-            data: data,
-            next: Atomic::null(),
-        });
+        let mut cur = Owned::new(Node::new(data));
         let mut next = to.load(Relaxed, scope);
 
         loop {
-            cur.next.store(next, Relaxed);
+            cur.0.next.store(next, Relaxed);
             match to.compare_and_set_weak_owned(next, cur, Release, scope) {
                 Ok(cur) => return cur,
                 Err((n, c)) => {
@@ -78,7 +85,7 @@ impl<T> List<T> {
         }
     }
 
-    pub fn insert_head<'scope, N>(&'scope self, data: T, scope: &'scope Scope<N>) -> Ptr<'scope, ListEntry<T>> where
+    pub fn insert_head<'scope, N>(&'scope self, data: T, scope: &'scope Scope<N>) -> Ptr<'scope, Node<T>> where
         N: Namespace + 'scope,
     {
         self.insert(&self.head, data, scope)
@@ -108,7 +115,7 @@ impl<T> Drop for List<T> {
             unprotected(|scope| {
                 let mut curr = self.head.load(Relaxed, scope);
                 while let Some(c) = curr.as_ref() {
-                    let succ = c.next.load(Relaxed, scope);
+                    let succ = c.0.next.load(Relaxed, scope);
                     scope.defer_free(curr);
                     curr = succ;
                 }
@@ -122,7 +129,7 @@ impl<'scope, N, T> Iter<'scope, N, T> where
 {
     pub fn next(&mut self) -> IterResult<T> {
         while let Some(c) = unsafe { self.curr.as_ref() } {
-            let succ = c.next.load(Acquire, self.scope);
+            let succ = c.0.next.load(Acquire, self.scope);
 
             if succ.tag() == 1 {
                 // This entry was removed. Try unlinking it from the list.
@@ -144,10 +151,10 @@ impl<'scope, N, T> Iter<'scope, N, T> where
             }
 
             // Move one step forward.
-            self.pred = &c.next;
+            self.pred = &c.0.next;
             self.curr = succ;
 
-            return IterResult::Some(&c.data);
+            return IterResult::Some(&c.0.data);
         }
 
         // We reached the end of the list.

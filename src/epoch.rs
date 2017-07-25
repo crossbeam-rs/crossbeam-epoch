@@ -5,11 +5,11 @@ use std::sync::atomic::Ordering::{Relaxed, Acquire, Release, SeqCst};
 use registry::Registry;
 use scope::{Namespace, Scope};
 use sync::list::{List, IterResult};
-
+use util::cache_padded::CachePadded;
 
 #[derive(Default, Debug)]
 pub struct Epoch {
-    epoch: AtomicUsize,
+    epoch: CachePadded<AtomicUsize>,
 }
 
 impl Epoch {

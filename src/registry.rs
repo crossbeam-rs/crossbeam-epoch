@@ -4,7 +4,7 @@ use std::sync::atomic::Ordering::{Relaxed, Release, SeqCst};
 use garbage::Bag;
 use global;
 use scope::Namespace;
-use sync::list::{List, ListEntry};
+use sync::list::{List, Node};
 
 #[derive(Default, Debug)]
 pub struct Registry {
@@ -66,7 +66,7 @@ impl Registry {
 
 impl List<Registry> {
     #[inline]
-    pub fn register<'scope>(&self) -> &'scope ListEntry<Registry> {
+    pub fn register<'scope>(&self) -> &'scope Node<Registry> {
         // Since we don't dereference any pointers in this block, it's okay to use `unprotected`.
         // Also, we use an invalid bag since no garbages are created in list insertion.
         unsafe {

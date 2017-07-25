@@ -7,7 +7,7 @@ use registry::Registry;
 use epoch::Epoch;
 use garbage::{Garbage, Bag};
 
-use sync::list::{List, ListEntry};
+use sync::list::{List, Node};
 use sync::ms_queue::MsQueue;
 
 
@@ -76,7 +76,7 @@ pub struct Agent<'scope, N: Namespace + 'scope> {
     /// This agent's namespace
     namespace: N,
     /// This agent's entry in the registry list.
-    registry: &'scope ListEntry<Registry>,
+    registry: &'scope Node<Registry>,
     /// The local garbage objects that will be later freed.
     bag: UnsafeCell<Bag>,
     /// Whether the thread is currently pinned.

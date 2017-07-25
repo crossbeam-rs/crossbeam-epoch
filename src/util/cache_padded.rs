@@ -119,6 +119,12 @@ impl<T> DerefMut for CachePadded<T> {
     }
 }
 
+impl<T: Default> Default for CachePadded<T> {
+    fn default() -> Self {
+        Self::new(Default::default())
+    }
+}
+
 // FIXME: support Drop by pulling out a version usable for statics
 /*
 impl<T> Drop for CachePadded<T> {
