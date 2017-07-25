@@ -4,6 +4,7 @@ mod atomic;
 mod participant;
 mod scope;
 mod registry;
+mod sync;
 
 pub use atomic::{Atomic, CompareAndSetOrdering, Owned, Ptr};
 pub use scope::{Scope, pin, unprotected};
