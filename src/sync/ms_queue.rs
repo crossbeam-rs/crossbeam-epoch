@@ -2,7 +2,7 @@ use std::{mem, ptr};
 use std::sync::atomic::Ordering::{Relaxed, Acquire, Release};
 
 use {Atomic, Owned, Ptr, Namespace, Scope, pin};
-use cache_padded::CachePadded;
+use util::cache_padded::CachePadded;
 
 /// A Michael-Scott lock-free queue, with support for blocking `pop`s.
 ///
@@ -42,12 +42,14 @@ impl<N:Namespace, T> MsQueue<N, T> {
             data: unsafe { mem::uninitialized() },
             next: Atomic::null(),
         });
-        pin(|scope| {
-            let sentinel = sentinel.into_ptr(scope);
-            q.head.store(sentinel, Relaxed);
-            q.tail.store(sentinel, Relaxed);
-            q
-        })
+        unsafe {
+            namespace.unprotected(|scope| {
+                let sentinel = sentinel.into_ptr(scope);
+                q.head.store(sentinel, Relaxed);
+                q.tail.store(sentinel, Relaxed);
+                q
+            })
+        }
     }
 
     #[inline(always)]
@@ -186,7 +188,7 @@ impl<N: Namespace, T> Drop for MsQueue<N, T> {
 #[cfg(test)]
 mod test {
     use {GlobalNamespace};
-    use scoped;
+    use util::scoped;
     use super::*;
 
     struct MsQueue<T> {

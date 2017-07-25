@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::thread;
 use std::io;
 
-use sync::atomic_option::AtomicOption;
+use util::atomic_option::AtomicOption;
 
 #[doc(hidden)]
 trait FnBox {
@@ -79,7 +79,7 @@ pub struct ScopedJoinHandle<T> {
 /// Creating and using a scope:
 ///
 /// ```
-/// crossbeam::scope(|scope| {
+/// crossbeam_epoch::util::scoped::scope(|scope| {
 ///     scope.defer(|| println!("Exiting scope"));
 ///     scope.spawn(|| println!("Running child thread in scope"))
 /// });
@@ -154,7 +154,7 @@ impl<'a> Scope<'a> {
     /// A basic scoped thread:
     ///
     /// ```
-    /// crossbeam::scope(|scope| {
+    /// crossbeam_epoch::util::scoped::scope(|scope| {
     ///     scope.spawn(|| {
     ///         println!("Hello from a scoped thread!");
     ///     });
@@ -244,7 +244,7 @@ impl<'a> Scope<'a> {
     /// ```
     /// let array = [1, 2, 3];
     ///
-    /// crossbeam::scope(|scope| {
+    /// crossbeam_epoch::util::scoped::scope(|scope| {
     ///     for i in &array {
     ///         scope.spawn(move || {
     ///             println!("element: {}", i);

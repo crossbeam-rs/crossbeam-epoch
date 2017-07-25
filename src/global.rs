@@ -25,9 +25,6 @@ pub struct GlobalNamespace {
 
 impl GlobalNamespace {
     pub fn new() -> Self {
-        epoch();
-        garbages::get();
-        registries();
         GlobalNamespace { }
     }
 }
@@ -66,6 +63,9 @@ thread_local! {
     /// If initialized, the agent will get destructed on thread exit, which in turn unregisters
     /// the thread.
     static AGENT: Agent = {
+        epoch();
+        garbages::get();
+        registries();
         Agent::new(GlobalNamespace::new())
     }
 }

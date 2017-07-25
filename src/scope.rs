@@ -190,7 +190,7 @@ impl<N> Scope<N> where
     unsafe fn defer_garbage(&self, mut garbage: Garbage) {
         let bag = self.get_bag();
 
-        while let Err(g) = bag.try_insert(garbage) {
+        while let Err(g) = bag.try_push(garbage) {
             self.namespace.push_bag(bag, self);
             garbage = g;
         }

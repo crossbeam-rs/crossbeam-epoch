@@ -29,7 +29,7 @@
 
 use std::mem;
 use boxfnonce::SendBoxFnOnce;
-
+use arrayvec::ArrayVec;
 
 /// Maximum number of objects a bag can contain.
 #[cfg(not(feature = "strict_gc"))]
@@ -107,42 +107,28 @@ impl Drop for Garbage {
 
 /// Bag of garbages.
 pub struct Bag {
-    /// Number of objects in the bag.
-    len: usize,
     /// Removed objects.
-    objects: [Garbage; MAX_OBJECTS],
+    objects: ArrayVec<[Garbage; MAX_OBJECTS]>,
 }
 
 impl Bag {
     /// Returns a new, empty bag.
     pub fn new() -> Self {
         Bag {
-            len: 0,
-            objects: unsafe { mem::zeroed() },
+            objects: ArrayVec::new(),
         }
     }
 
     /// Returns `true` if the bag is empty.
     pub fn is_empty(&self) -> bool {
-        self.len == 0
+        self.objects.is_empty()
     }
 
     /// Attempts to insert a garbage object into the bag and returns `true` if succeeded.
-    pub fn try_insert(&mut self, garbage: Garbage) -> Result<(), Garbage> {
-        if self.len == self.objects.len() {
-            return Err(garbage);
-        }
-
-        self.objects[self.len] = garbage;
-        self.len += 1;
-        Ok(())
-    }
-}
-
-impl Drop for Bag {
-    fn drop(&mut self) {
-        for garbage in self.objects.into_iter().take(self.len) {
-            drop(garbage)
+    pub fn try_push(&mut self, garbage: Garbage) -> Result<(), Garbage> {
+        match self.objects.push(garbage) {
+            None => Ok(()),
+            Some(g) => Err(g),
         }
     }
 }

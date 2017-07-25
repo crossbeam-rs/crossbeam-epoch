@@ -3,9 +3,9 @@
 #[macro_use(defer)]
 extern crate scopeguard;
 extern crate boxfnonce;
+extern crate arrayvec;
 
-#[macro_use]
-mod lazy_static;
+#[macro_use] pub mod util;
 mod atomic;
 mod registry;
 mod epoch;
@@ -14,8 +14,6 @@ mod scope;
 mod global;
 mod user;
 pub mod sync;
-pub mod cache_padded;
-pub mod scoped;
 
 pub use self::atomic::{Atomic, CompareAndSetOrdering, Owned, Ptr};
 pub use self::scope::{Namespace, Agent, Scope};
