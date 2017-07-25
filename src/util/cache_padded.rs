@@ -39,7 +39,7 @@ impl<T> fmt::Debug for CachePadded<T> {
 unsafe impl<T: Send> Send for CachePadded<T> {}
 unsafe impl<T: Sync> Sync for CachePadded<T> {}
 
-/// Types for which mem::zeroed() is safe.
+/// Types for which `mem::zeroed()` is safe.
 ///
 /// If a type `T: ZerosValid`, then a sequence of zeros the size of `T` must be
 /// a valid member of the type `T`.
@@ -63,7 +63,7 @@ impl<T: ZerosValid> CachePadded<T> {
     #[cfg(not(feature = "nightly"))]
     pub fn zeroed() -> CachePadded<T> {
         CachePadded {
-            data: UnsafeCell::new(([0; CACHE_LINE])),
+            data: UnsafeCell::new([0; CACHE_LINE]),
             _marker: ([], marker::PhantomData),
         }
     }
@@ -72,7 +72,7 @@ impl<T: ZerosValid> CachePadded<T> {
     #[cfg(feature = "nightly")]
     pub const fn zeroed() -> CachePadded<T> {
         CachePadded {
-            data: UnsafeCell::new(([0; CACHE_LINE])),
+            data: UnsafeCell::new([0; CACHE_LINE]),
             _marker: ([], marker::PhantomData),
         }
     }
@@ -93,11 +93,11 @@ impl<T> CachePadded<T> {
     pub fn new(t: T) -> CachePadded<T> {
         assert_valid::<T>();
         let ret = CachePadded {
-            data: UnsafeCell::new(([0; CACHE_LINE])),
+            data: UnsafeCell::new([0; CACHE_LINE]),
             _marker: ([], marker::PhantomData),
         };
         unsafe {
-            let p: *mut T = mem::transmute(&ret.data);
+            let p: *mut T = &ret.data as *const UnsafeCell<[usize; CACHE_LINE]> as *mut T;
             ptr::write(p, t);
         }
         ret

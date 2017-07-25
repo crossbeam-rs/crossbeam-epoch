@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicUsize, ATOMIC_USIZE_INIT};
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Relaxed, Release, SeqCst};
 
 use garbage::Bag;
@@ -6,6 +6,7 @@ use global;
 use scope::Namespace;
 use sync::list::{List, ListEntry};
 
+#[derive(Default, Debug)]
 pub struct Registry {
     /// The least significant bit is set if the thread is currently pinned. The rest of the bits
     /// encode the current epoch.
@@ -19,7 +20,7 @@ impl Registry {
 
     #[inline]
     pub fn new() -> Self {
-        Registry { state: ATOMIC_USIZE_INIT }
+        Self::default()
     }
 
     #[inline]

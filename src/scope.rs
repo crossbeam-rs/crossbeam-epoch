@@ -19,9 +19,9 @@ const COLLECT_STEPS: usize = 8;
 
 
 pub trait Namespace: Copy {
-    fn epoch(&self) -> &Epoch;
-    fn garbages(&self) -> &MsQueue<Self, (usize, Bag)>;
     fn registries(&self) -> &List<Registry>;
+    fn garbages(&self) -> &MsQueue<Self, (usize, Bag)>;
+    fn epoch(&self) -> &Epoch;
 
     #[inline]
     fn push_bag<'scope>(self, bag: &mut Bag, scope: &'scope Scope<Self>) {
@@ -34,7 +34,7 @@ pub trait Namespace: Copy {
     /// Collect several bags from the global old garbage queue and destroys their objects.
     /// Note: This may itself produce garbage and in turn allocate new bags.
     #[inline]
-    fn collect<'scope>(self, scope: &'scope Scope<Self>) {
+    fn collect(self, scope: &Scope<Self>) {
         let epoch = self.epoch().try_advance(self.registries(), scope);
         let garbages = self.garbages();
         let condition = |bag: &(usize, Bag)| {

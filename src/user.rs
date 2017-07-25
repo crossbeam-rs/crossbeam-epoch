@@ -7,15 +7,19 @@ use sync::ms_queue::MsQueue;
 
 
 pub struct UserNamespace<'scope> {
-    epoch: Epoch,
-    garbages: MsQueue<&'scope UserNamespace<'scope>, (usize, Bag)>,
     registries: List<Registry>,
+    garbages: MsQueue<&'scope UserNamespace<'scope>, (usize, Bag)>,
+    epoch: Epoch,
 }
 
 impl<'scope> UserNamespace<'scope> {
     pub fn new() -> Self {
         unimplemented!()
-        // UserNamespace { epoch: Epoch::new(), garbages: MsQueue::new(&self), registries: List::new() }
+        // UserNamespace {
+        //     epoch: Epoch::new(),
+        //     garbages: MsQueue::new(&self),
+        //     registries: List::new()
+        // }
     }
 }
 
@@ -26,23 +30,15 @@ impl<'scope> Default for UserNamespace<'scope> {
 }
 
 impl<'scope> Namespace for &'scope UserNamespace<'scope> {
-    fn epoch(&self) -> &Epoch {
-        &self.epoch
+    fn registries(&self) -> &List<Registry> {
+        &self.registries
     }
 
     fn garbages(&self) -> &MsQueue<&'scope UserNamespace<'scope>, (usize, Bag)> {
         &self.garbages
     }
 
-    fn registries(&self) -> &List<Registry> {
-        &self.registries
-    }
-}
-
-impl<'scope> Drop for UserNamespace<'scope> {
-    fn drop(&mut self) {
-        drop(&mut self.registries);
-        drop(&mut self.garbages);
-        drop(&mut self.epoch);
+    fn epoch(&self) -> &Epoch {
+        &self.epoch
     }
 }

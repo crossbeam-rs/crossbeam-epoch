@@ -66,7 +66,7 @@ impl<N:Namespace, T> MsQueue<N, T> {
         // is `onto` the actual tail?
         let o = unsafe { onto.deref() };
         let next = o.next.load(Acquire, scope);
-        if let Some(_) = unsafe { next.as_ref() } {
+        if unsafe { next.as_ref().is_some() } {
             // if not, try to "help" by moving the tail pointer forward
             let _ = self.tail.compare_and_set(onto, next, Release, scope);
             Err(new)
@@ -116,7 +116,7 @@ impl<N:Namespace, T> MsQueue<N, T> {
         let next = h.next.load(Acquire, scope);
         match unsafe { next.as_ref() } {
             None => Ok(None),
-            Some(ref n) => {
+            Some(n) => {
                 unsafe {
                     if self.head.compare_and_set(head, next, Release, scope).is_ok() {
                         scope.defer_free(head);

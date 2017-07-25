@@ -154,3 +154,9 @@ impl<'scope, N, T> Iter<'scope, N, T> where
         IterResult::None
     }
 }
+
+impl<T> Default for List<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}

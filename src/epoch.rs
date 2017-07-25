@@ -1,5 +1,5 @@
 use std::ops::Deref;
-use std::sync::atomic::{AtomicUsize, ATOMIC_USIZE_INIT};
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Relaxed, Acquire, Release, SeqCst};
 
 use registry::Registry;
@@ -7,13 +7,14 @@ use scope::{Namespace, Scope};
 use sync::list::{List, IterResult};
 
 
+#[derive(Default, Debug)]
 pub struct Epoch {
     epoch: AtomicUsize,
 }
 
 impl Epoch {
     pub fn new() -> Self {
-        Epoch { epoch: ATOMIC_USIZE_INIT }
+        Self::default()
     }
 
     /// Attempts to advance the global epoch.

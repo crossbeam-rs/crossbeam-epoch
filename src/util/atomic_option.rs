@@ -10,7 +10,7 @@ pub struct AtomicOption<T> {
 }
 
 impl<T> AtomicOption<T> {
-    pub fn new() -> AtomicOption<T> {
+    pub fn new() -> Self {
         AtomicOption { inner: AtomicPtr::new(ptr::null_mut()) }
     }
 
@@ -34,5 +34,11 @@ impl<T> AtomicOption<T> {
 
     pub fn take(&self, order: Ordering) -> Option<T> {
         self.swap_inner(ptr::null_mut(), order).map(|old| *old)
+    }
+}
+
+impl<T> Default for AtomicOption<T> {
+    fn default() -> Self {
+        Self::new()
     }
 }

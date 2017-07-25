@@ -92,11 +92,11 @@ impl Garbage {
 
 impl Drop for Garbage {
     fn drop(&mut self) {
-        match self {
-            &mut Garbage::Destroy { destroy, object, size } => {
+        match *self {
+            Garbage::Destroy { destroy, object, size } => {
                 unsafe { (destroy)(object, size); }
             },
-            &mut Garbage::Fn { ref mut f } => {
+            Garbage::Fn { ref mut f } => {
                 let f = f.take().unwrap();
                 f.call();
             },
@@ -106,6 +106,7 @@ impl Drop for Garbage {
 
 
 /// Bag of garbages.
+#[derive(Default)]
 pub struct Bag {
     /// Removed objects.
     objects: ArrayVec<[Garbage; MAX_OBJECTS]>,
@@ -114,9 +115,7 @@ pub struct Bag {
 impl Bag {
     /// Returns a new, empty bag.
     pub fn new() -> Self {
-        Bag {
-            objects: ArrayVec::new(),
-        }
+        Self::default()
     }
 
     /// Returns `true` if the bag is empty.
