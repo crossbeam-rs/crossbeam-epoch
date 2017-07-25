@@ -19,6 +19,22 @@ pub trait Namespace: Copy {
     fn epoch(&self) -> &Epoch;
     fn garbages(&self) -> &Queue<(usize, Bag)>;
     fn registries(&self) -> &List<Registry>;
+
+    unsafe fn unprotected_with_bag<F, R>(self, bag: &mut Bag, f: F) -> R
+        where F: FnOnce(&Scope<Self>) -> R,
+    {
+        let scope = &Scope { namespace: self, bag: bag };
+        f(scope)
+    }
+
+    unsafe fn unprotected<F, R>(self, f: F) -> R
+        where F: FnOnce(&Scope<Self>) -> R,
+    {
+        let mut bag = Bag::new();
+        let result = self.unprotected_with_bag(&mut bag, f);
+        drop(bag); // FIXME(jeehoonkang)
+        result
+    }
 }
 
 
@@ -97,7 +113,7 @@ impl<'scope, N: Namespace> Agent<'scope, N> {
             // Pin the thread.
             self.is_pinned.set(true);
             let epoch = self.namespace.epoch().load(Relaxed);
-            registry.set_pinned(epoch, scope);
+            registry.set_pinned(epoch);
 
             // Increment the pin counter.
             let count = self.pin_count.get();
@@ -124,22 +140,6 @@ impl<'scope, N: Namespace> Agent<'scope, N> {
 
     pub fn is_pinned(&self) -> bool {
         self.is_pinned.get()
-    }
-
-    pub unsafe fn unprotected_with_bag<F, R>(&self, bag: &mut Bag, f: F) -> R
-        where F: FnOnce(&Scope<N>) -> R,
-    {
-        let scope = &Scope { namespace: self.namespace, bag: bag };
-        f(scope)
-    }
-
-    pub unsafe fn unprotected<F, R>(&self, f: F) -> R
-        where F: FnOnce(&Scope<N>) -> R,
-    {
-        let mut bag = Bag::new();
-        let result = self.unprotected_with_bag(&mut bag, f);
-        drop(bag); // FIXME(jeehoonkang)
-        result
     }
 }
 

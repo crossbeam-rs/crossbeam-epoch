@@ -2,7 +2,6 @@ use std::sync::atomic::{AtomicUsize, ATOMIC_USIZE_INIT};
 use std::sync::atomic::Ordering::{Relaxed, Release, SeqCst};
 
 use garbage::Bag;
-use scope::{Namespace, Scope};
 use global;
 use sync::list::{List, ListEntry};
 
@@ -32,7 +31,7 @@ impl Registry {
     ///
     /// Must not be called if the thread is already pinned!
     #[inline]
-    pub fn set_pinned<N: Namespace>(&self, epoch: usize, _: &Scope<N>) {
+    pub fn set_pinned(&self, epoch: usize) {
         let state = epoch | 1;
 
         // Now we must store `state` into `self.state`. It's important that any succeeding loads
