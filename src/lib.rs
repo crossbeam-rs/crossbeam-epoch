@@ -18,4 +18,4 @@ pub mod sync;
 pub use self::atomic::{Atomic, CompareAndSetOrdering, Owned, Ptr};
 pub use self::scope::{Namespace, Agent, Scope};
 pub use self::global::{pin, is_pinned, unprotected, GlobalNamespace};
-pub use self::user::UserNamespace;
+pub use self::user::{with_namespace};

@@ -44,12 +44,6 @@ impl Namespace for GlobalNamespace {
     }
 }
 
-pub unsafe fn unprotected_with_bag<F, R>(bag: &mut Bag, f: F) -> R
-    where F: FnOnce(&Scope) -> R,
-{
-    GlobalNamespace::new().unprotected_with_bag(bag, f)
-}
-
 pub unsafe fn unprotected<F, R>(f: F) -> R
     where F: FnOnce(&Scope) -> R,
 {

@@ -91,7 +91,15 @@ impl<'scope, N> Agent<'scope, N> where
     pub fn new(n: N) -> Self {
         Agent {
             namespace: n,
-            registry: n.registries().register(),
+            registry: unsafe {
+                // Since we don't dereference any pointers in this block, it's okay to use
+                // `unprotected`.  Also, we use an invalid bag since no garbages are created in list
+                // insertion.
+                let mut bag = ::std::mem::zeroed::<Bag>();
+                n.unprotected_with_bag(&mut bag, |scope| {
+                    &*n.registries().insert_head(Registry::new(), scope).as_raw()
+                })
+            },
             bag: UnsafeCell::new(Bag::new()),
             is_pinned: Cell::new(false),
             pin_count: Cell::new(0),

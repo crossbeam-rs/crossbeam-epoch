@@ -12,23 +12,6 @@ pub struct UserNamespace<'scope> {
     epoch: Epoch,
 }
 
-impl<'scope> UserNamespace<'scope> {
-    pub fn new() -> Self {
-        unimplemented!()
-        // UserNamespace {
-        //     epoch: Epoch::new(),
-        //     garbages: MsQueue::new(&self),
-        //     registries: List::new()
-        // }
-    }
-}
-
-impl<'scope> Default for UserNamespace<'scope> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl<'scope> Namespace for &'scope UserNamespace<'scope> {
     fn registries(&self) -> &List<Registry> {
         &self.registries
@@ -40,5 +23,20 @@ impl<'scope> Namespace for &'scope UserNamespace<'scope> {
 
     fn epoch(&self) -> &Epoch {
         &self.epoch
+    }
+}
+
+pub fn with_namespace<F, R>(f: F) -> R where
+    for<'scope> F: FnOnce(&'scope UserNamespace<'scope>) -> R,
+{
+    unsafe {
+        let mut namespace = UserNamespace {
+            registries: List::new(),
+            garbages: ::std::mem::zeroed(),
+            epoch: Epoch::new(),
+        };
+        let garbages = ::std::mem::transmute(MsQueue::<_, (usize, Bag)>::new(&namespace));
+        let _ = ::std::mem::replace(&mut namespace.garbages, garbages);
+        f(&namespace)
     }
 }

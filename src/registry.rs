@@ -1,10 +1,7 @@
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Relaxed, Release, SeqCst};
 
-use garbage::Bag;
-use global;
 use scope::Namespace;
-use sync::list::{List, Node};
 
 #[derive(Default, Debug)]
 pub struct Registry {
@@ -61,19 +58,5 @@ impl Registry {
         // Clear the last bit.
         // We don't need to preserve the epoch, so just store the number zero.
         self.state.store(0, Release);
-    }
-}
-
-impl List<Registry> {
-    #[inline]
-    pub fn register<'scope>(&self) -> &'scope Node<Registry> {
-        // Since we don't dereference any pointers in this block, it's okay to use `unprotected`.
-        // Also, we use an invalid bag since no garbages are created in list insertion.
-        unsafe {
-            let mut bag = ::std::mem::zeroed::<Bag>();
-            global::unprotected_with_bag(&mut bag, |scope| {
-                &*self.insert_head(Registry::new(), scope).as_raw()
-            })
-        }
     }
 }
