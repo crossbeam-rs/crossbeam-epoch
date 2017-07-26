@@ -26,7 +26,8 @@ impl<'scope> Namespace for &'scope UserNamespace<'scope> {
     }
 }
 
-pub fn with_namespace<F, R>(f: F) -> R where
+pub fn with_namespace<F, R>(f: F) -> R
+where
     for<'scope> F: FnOnce(&'scope UserNamespace<'scope>) -> R,
 {
     unsafe {

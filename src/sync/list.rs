@@ -20,7 +20,8 @@ pub struct List<T> {
     head: Atomic<Node<T>>,
 }
 
-pub struct Iter<'scope, N, T: 'scope> where
+pub struct Iter<'scope, N, T: 'scope>
+where
     N: Namespace + 'scope,
 {
     /// The scope in which the iterator is operating.
@@ -53,7 +54,8 @@ impl<T> Node<T> {
     }
 
     /// Marks this entry as deleted.
-    pub fn delete<'scope, N>(&self, scope: &Scope<N>) where
+    pub fn delete<'scope, N>(&self, scope: &Scope<N>)
+    where
         N: Namespace + 'scope,
     {
         self.0.next.fetch_or(1, Release, scope);
@@ -67,7 +69,13 @@ impl<T> List<T> {
     }
 
     /// Inserts `data` into the list.
-    pub fn insert<'scope, N>(&'scope self, to: &'scope Atomic<Node<T>>, data: T, scope: &'scope Scope<N>) -> Ptr<'scope, Node<T>> where
+    pub fn insert<'scope, N>(
+        &'scope self,
+        to: &'scope Atomic<Node<T>>,
+        data: T,
+        scope: &'scope Scope<N>,
+    ) -> Ptr<'scope, Node<T>>
+    where
         N: Namespace + 'scope,
     {
         let mut cur = Owned::new(Node::new(data));
@@ -85,7 +93,12 @@ impl<T> List<T> {
         }
     }
 
-    pub fn insert_head<'scope, N>(&'scope self, data: T, scope: &'scope Scope<N>) -> Ptr<'scope, Node<T>> where
+    pub fn insert_head<'scope, N>(
+        &'scope self,
+        data: T,
+        scope: &'scope Scope<N>,
+    ) -> Ptr<'scope, Node<T>>
+    where
         N: Namespace + 'scope,
     {
         self.insert(&self.head, data, scope)
@@ -94,13 +107,14 @@ impl<T> List<T> {
     /// Returns an iterator over all data.
     ///
     /// Every datum that is inserted at the moment this function is called and persists at least
-    /// until the end of iteration will be returned. Since this iterator traverses a lock-free linked
-    /// list that may be concurrently modified, some additional caveats apply:
+    /// until the end of iteration will be returned. Since this iterator traverses a lock-free
+    /// linked list that may be concurrently modified, some additional caveats apply:
     ///
     /// 1. If a new datum is inserted during iteration, it may or may not be returned.
     /// 2. If a datum is deleted during iteration, it may or may not be returned.
     /// 3. It may not return all data if a concurrent thread continues to iterate the same list.
-    pub fn iter<'scope, N>(&'scope self, scope: &'scope Scope<N>) -> Iter<'scope, N, T> where
+    pub fn iter<'scope, N>(&'scope self, scope: &'scope Scope<N>) -> Iter<'scope, N, T>
+    where
         N: Namespace + 'scope,
     {
         let pred = &self.head;
@@ -124,7 +138,8 @@ impl<T> Drop for List<T> {
     }
 }
 
-impl<'scope, N, T> Iter<'scope, N, T> where
+impl<'scope, N, T> Iter<'scope, N, T>
+where
     N: Namespace + 'scope,
 {
     pub fn next(&mut self) -> IterResult<T> {
@@ -135,11 +150,18 @@ impl<'scope, N, T> Iter<'scope, N, T> where
                 // This entry was removed. Try unlinking it from the list.
                 let succ = succ.with_tag(0);
 
-                match self.pred.compare_and_set_weak(self.curr, succ, Acquire, self.scope) {
+                match self.pred.compare_and_set_weak(
+                    self.curr,
+                    succ,
+                    Acquire,
+                    self.scope,
+                ) {
                     Ok(_) => {
-                        unsafe { self.scope.defer_free(self.curr); }
+                        unsafe {
+                            self.scope.defer_free(self.curr);
+                        }
                         self.curr = succ;
-                    },
+                    }
                     Err(_) => {
                         // We lost the race to delete the entry.  Since another thread trying
                         // to iterate the list has won the race, we return early.

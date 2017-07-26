@@ -39,9 +39,13 @@ const MAX_OBJECTS: usize = 4;
 
 
 pub enum Garbage {
-    Destroy { object: *mut u8, size: usize, destroy: unsafe fn(*mut u8, usize), },
+    Destroy {
+        object: *mut u8,
+        size: usize,
+        destroy: unsafe fn(*mut u8, usize),
+    },
     Free { object: *mut u8, size: usize },
-    Fn { f: Option<SendBoxFnOnce<(), ()>>, },
+    Fn { f: Option<SendBoxFnOnce<(), ()>> },
 }
 
 impl Garbage {
@@ -93,16 +97,18 @@ impl Garbage {
 impl Drop for Garbage {
     fn drop(&mut self) {
         match *self {
-            Garbage::Destroy { destroy, object, size } => {
-                unsafe { (destroy)(object, size); }
+            Garbage::Destroy {
+                destroy,
+                object,
+                size,
+            } => unsafe {
+                (destroy)(object, size);
             },
-            Garbage::Free { object, size } => {
-                unsafe { drop(Vec::from_raw_parts(object, 0, size)) }
-            },
+            Garbage::Free { object, size } => unsafe { drop(Vec::from_raw_parts(object, 0, size)) },
             Garbage::Fn { ref mut f } => {
                 let f = f.take().unwrap();
                 f.call();
-            },
+            }
         }
     }
 }

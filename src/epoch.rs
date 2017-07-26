@@ -24,7 +24,8 @@ impl Epoch {
     ///
     /// Returns the current global epoch.
     #[cold]
-    pub fn try_advance<'scope, N>(&self, registries: &List<Registry>, scope: &Scope<N>) -> usize where
+    pub fn try_advance<'scope, N>(&self, registries: &List<Registry>, scope: &Scope<N>) -> usize
+    where
         N: Namespace + 'scope,
     {
         let epoch = self.epoch.load(Relaxed);
@@ -35,16 +36,16 @@ impl Epoch {
         loop {
             match registries.next() {
                 IterResult::Abort => {
-                    // We leave the job to the thread that also tries to advance to epoch and continues
-                    // to iterate the registries.
+                    // We leave the job to the thread that also tries to advance to epoch and
+                    // continues to iterate the registries.
                     return epoch;
-                },
+                }
                 IterResult::None => break,
                 IterResult::Some(registry) => {
                     let (thread_is_pinned, thread_epoch) = registry.get_state();
 
-                    // If the thread was pinned in a different epoch, we cannot advance the global epoch
-                    // just yet.
+                    // If the thread was pinned in a different epoch, we cannot advance the global
+                    // epoch just yet.
                     if thread_is_pinned && thread_epoch != epoch {
                         return epoch;
                     }

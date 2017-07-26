@@ -14,15 +14,16 @@ type Scope = scope::Scope<GlobalNamespace>;
 lazy_static_null!(pub, registries, List<Registry>);
 
 /// garbages() returns a reference to the global garbage queue, which is lazily initialized.
-lazy_static!(pub, garbages, MsQueue<GlobalNamespace, (usize, Bag)>, MsQueue::new(GlobalNamespace::new()));
+lazy_static!(pub, garbages,
+             MsQueue<GlobalNamespace, (usize, Bag)>,
+             MsQueue::new(GlobalNamespace::new()));
 
 /// epoch() returns a reference to the global epoch.
 lazy_static_null!(pub, epoch, Epoch);
 
 
 #[derive(Clone, Copy, Default, Debug)]
-pub struct GlobalNamespace {
-}
+pub struct GlobalNamespace {}
 
 impl GlobalNamespace {
     pub fn new() -> Self {
@@ -45,7 +46,8 @@ impl Namespace for GlobalNamespace {
 }
 
 pub unsafe fn unprotected<F, R>(f: F) -> R
-    where F: FnOnce(&Scope) -> R,
+where
+    F: FnOnce(&Scope) -> R,
 {
     GlobalNamespace::new().unprotected(f)
 }
@@ -66,7 +68,8 @@ thread_local! {
 }
 
 pub fn pin<F, R>(f: F) -> R
-    where F: FnOnce(&Scope) -> R,
+where
+    F: FnOnce(&Scope) -> R,
 {
     AGENT.with(|agent| agent.pin(f))
 }

@@ -47,21 +47,26 @@ pub trait Namespace: Copy {
         for _ in 0..COLLECT_STEPS {
             match garbages.try_pop_if(&condition, scope) {
                 None => break,
-                Some(bag) => drop(bag)
+                Some(bag) => drop(bag),
             }
         }
     }
 
     #[inline]
-    unsafe fn unprotected_with_bag<F, R>(self, bag: &mut Bag, f: F) -> R where
+    unsafe fn unprotected_with_bag<F, R>(self, bag: &mut Bag, f: F) -> R
+    where
         F: FnOnce(&Scope<Self>) -> R,
     {
-        let scope = &Scope { namespace: self, bag: bag };
+        let scope = &Scope {
+            namespace: self,
+            bag: bag,
+        };
         f(scope)
     }
 
     #[inline]
-    unsafe fn unprotected<F, R>(self, f: F) -> R where
+    unsafe fn unprotected<F, R>(self, f: F) -> R
+    where
         F: FnOnce(&Scope<Self>) -> R,
     {
         let mut bag = Bag::new();
@@ -85,7 +90,8 @@ pub struct Agent<'scope, N: Namespace + 'scope> {
     pin_count: Cell<usize>,
 }
 
-impl<'scope, N> Agent<'scope, N> where
+impl<'scope, N> Agent<'scope, N>
+where
     N: Namespace + 'scope,
 {
     pub fn new(n: N) -> Self {
@@ -116,19 +122,23 @@ impl<'scope, N> Agent<'scope, N> where
     /// deleted objects protected by [`Atomic`]s. The provided function should be very quick -
     /// generally speaking, it shouldn't take more than 100 ms.
     ///
-    /// Pinning is reentrant. There is no harm in pinning a thread while it's already pinned (repinning
-    /// is essentially a noop).
+    /// Pinning is reentrant. There is no harm in pinning a thread while it's already pinned
+    /// (repinning is essentially a noop).
     ///
     /// Pinning itself comes with a price: it begins with a `SeqCst` fence and performs a few other
-    /// atomic operations. However, this mechanism is designed to be as performant as possible, so it
-    /// can be used pretty liberally. On a modern machine pinning takes 10 to 15 nanoseconds.
+    /// atomic operations. However, this mechanism is designed to be as performant as possible, so
+    /// it can be used pretty liberally. On a modern machine pinning takes 10 to 15 nanoseconds.
     ///
     /// [`Atomic`]: struct.Atomic.html
-    pub fn pin<F, R>(&self, f: F) -> R where
+    pub fn pin<F, R>(&self, f: F) -> R
+    where
         F: FnOnce(&Scope<N>) -> R,
     {
         let registry = self.registry.get();
-        let scope = &Scope { namespace: self.namespace, bag: self.bag.get() };
+        let scope = &Scope {
+            namespace: self.namespace,
+            bag: self.bag.get(),
+        };
 
         let was_pinned = self.is_pinned.get();
         if !was_pinned {
@@ -188,7 +198,8 @@ pub struct Scope<N: Namespace> {
     bag: *mut Bag, // !Send + !Sync
 }
 
-impl<N> Scope<N> where
+impl<N> Scope<N>
+where
     N: Namespace,
 {
     unsafe fn get_bag(&self) -> &mut Bag {

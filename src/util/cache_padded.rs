@@ -8,8 +8,7 @@ use std::ops::{Deref, DerefMut};
 // For now, treat this as an arch-independent constant.
 const CACHE_LINE: usize = 32;
 
-#[cfg_attr(feature = "nightly",
-           repr(simd))]
+#[cfg_attr(feature = "nightly", repr(simd))]
 #[derive(Debug)]
 struct Padding(u64, u64, u64, u64);
 

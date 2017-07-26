@@ -5,7 +5,8 @@ extern crate scopeguard;
 extern crate boxfnonce;
 extern crate arrayvec;
 
-#[macro_use] pub mod util;
+#[macro_use]
+pub mod util;
 mod atomic;
 mod registry;
 mod epoch;
@@ -18,4 +19,4 @@ pub mod sync;
 pub use self::atomic::{Atomic, CompareAndSetOrdering, Owned, Ptr};
 pub use self::scope::{Namespace, Agent, Scope};
 pub use self::global::{pin, is_pinned, unprotected, GlobalNamespace};
-pub use self::user::{with_namespace};
+pub use self::user::with_namespace;

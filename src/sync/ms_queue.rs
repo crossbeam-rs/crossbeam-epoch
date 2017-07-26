@@ -26,11 +26,11 @@ struct Node<T> {
 
 // Any particular `T` should never accessed concurrently, so no need
 // for Sync.
-unsafe impl<N:Namespace, T: Send> Sync for MsQueue<N, T> {}
-unsafe impl<N:Namespace, T: Send> Send for MsQueue<N, T> {}
+unsafe impl<N: Namespace, T: Send> Sync for MsQueue<N, T> {}
+unsafe impl<N: Namespace, T: Send> Send for MsQueue<N, T> {}
 
 
-impl<N:Namespace, T> MsQueue<N, T> {
+impl<N: Namespace, T> MsQueue<N, T> {
     /// Create a new, empty queue.
     pub fn new(namespace: N) -> MsQueue<N, T> {
         let q = MsQueue {
@@ -57,12 +57,12 @@ impl<N:Namespace, T> MsQueue<N, T> {
     ///
     /// If unsuccessful, returns ownership of `n`, possibly updating
     /// the queue's `tail` pointer.
-    fn push_internal(&self,
-                     onto: Ptr<Node<T>>,
-                     new: Owned<Node<T>>,
-                     scope: &Scope<N>)
-                     -> Result<(), Owned<Node<T>>>
-    {
+    fn push_internal(
+        &self,
+        onto: Ptr<Node<T>>,
+        new: Owned<Node<T>>,
+        scope: &Scope<N>,
+    ) -> Result<(), Owned<Node<T>>> {
         // is `onto` the actual tail?
         let o = unsafe { onto.deref() };
         let next = o.next.load(Acquire, scope);
@@ -72,12 +72,13 @@ impl<N:Namespace, T> MsQueue<N, T> {
             Err(new)
         } else {
             // looks like the actual tail; attempt to link in `n`
-            o.next.compare_and_set_owned(Ptr::null(), new, Release, scope)
+            o.next
+                .compare_and_set_owned(Ptr::null(), new, Release, scope)
                 .map(|new| {
                     // try to move the tail pointer forward
                     let _ = self.tail.compare_and_set(onto, new, Release, scope);
                 })
-                .map_err(|(_, new)| { new })
+                .map_err(|(_, new)| new)
         }
     }
 
@@ -86,7 +87,7 @@ impl<N:Namespace, T> MsQueue<N, T> {
     pub fn push(&self, t: T, scope: &Scope<N>) {
         let mut new = Owned::new(Node {
             data: t,
-            next: Atomic::null()
+            next: Atomic::null(),
         });
 
         loop {
@@ -116,16 +117,17 @@ impl<N:Namespace, T> MsQueue<N, T> {
         let next = h.next.load(Acquire, scope);
         match unsafe { next.as_ref() } {
             None => Ok(None),
-            Some(n) => {
-                unsafe {
-                    if self.head.compare_and_set(head, next, Release, scope).is_ok() {
-                        scope.defer_free(head);
-                        Ok(Some(ptr::read(&n.data)))
-                    } else {
-                        Err(())
-                    }
+            Some(n) => unsafe {
+                if self.head
+                    .compare_and_set(head, next, Release, scope)
+                    .is_ok()
+                {
+                    scope.defer_free(head);
+                    Ok(Some(ptr::read(&n.data)))
+                } else {
+                    Err(())
                 }
-            }
+            },
         }
     }
 
@@ -149,7 +151,8 @@ impl<N:Namespace, T> MsQueue<N, T> {
         }
     }
 
-    pub fn try_pop_if<F>(&self, condition: F, scope: &Scope<N>) -> Option<T> where
+    pub fn try_pop_if<F>(&self, condition: F, scope: &Scope<N>) -> Option<T>
+    where
         F: Fn(&T) -> bool,
     {
         loop {
@@ -161,9 +164,9 @@ impl<N:Namespace, T> MsQueue<N, T> {
                             return Some(h);
                         } else {
                             mem::forget(h);
-                            return None
+                            return None;
                         }
-                    },
+                    }
                 }
             }
         }
@@ -187,7 +190,7 @@ impl<N: Namespace, T> Drop for MsQueue<N, T> {
 
 #[cfg(test)]
 mod test {
-    use {GlobalNamespace};
+    use GlobalNamespace;
     use util::scoped;
     use super::*;
 
@@ -201,7 +204,7 @@ mod test {
         }
 
         pub fn push(&self, t: T) {
-            pin(|scope| { self.queue.push(t, scope) })
+            pin(|scope| self.queue.push(t, scope))
         }
 
         pub fn is_empty(&self) -> bool {
@@ -209,7 +212,7 @@ mod test {
         }
 
         pub fn try_pop(&self) -> Option<T> {
-            pin(|scope| { self.queue.try_pop(scope) })
+            pin(|scope| self.queue.try_pop(scope))
         }
 
         pub fn pop(&self) -> T {
@@ -325,7 +328,9 @@ mod test {
                     assert!(elem > cur);
                     cur = elem;
 
-                    if cur == CONC_COUNT - 1 { break }
+                    if cur == CONC_COUNT - 1 {
+                        break;
+                    }
                 }
             }
         }
@@ -338,53 +343,48 @@ mod test {
                 scope.spawn(move || recv(i, qr));
             }
 
-            scope.spawn(|| {
-                for i in 0..CONC_COUNT {
-                    q.push(i);
-                }
+            scope.spawn(|| for i in 0..CONC_COUNT {
+                q.push(i);
             })
         });
     }
 
     #[test]
     fn push_try_pop_many_mpmc() {
-        enum LR { Left(i64), Right(i64) }
+        enum LR {
+            Left(i64),
+            Right(i64),
+        }
 
         let q: MsQueue<LR> = MsQueue::new();
         assert!(q.is_empty());
 
-        scoped::scope(|scope| {
-            for _t in 0..2 {
-                scope.spawn(|| {
-                    for i in CONC_COUNT-1..CONC_COUNT {
-                        q.push(LR::Left(i))
+        scoped::scope(|scope| for _t in 0..2 {
+            scope.spawn(|| for i in CONC_COUNT - 1..CONC_COUNT {
+                q.push(LR::Left(i))
+            });
+            scope.spawn(|| for i in CONC_COUNT - 1..CONC_COUNT {
+                q.push(LR::Right(i))
+            });
+            scope.spawn(|| {
+                let mut vl = vec![];
+                let mut vr = vec![];
+                for _i in 0..CONC_COUNT {
+                    match q.try_pop() {
+                        Some(LR::Left(x)) => vl.push(x),
+                        Some(LR::Right(x)) => vr.push(x),
+                        _ => {}
                     }
-                });
-                scope.spawn(|| {
-                    for i in CONC_COUNT-1..CONC_COUNT {
-                        q.push(LR::Right(i))
-                    }
-                });
-                scope.spawn(|| {
-                    let mut vl = vec![];
-                    let mut vr = vec![];
-                    for _i in 0..CONC_COUNT {
-                        match q.try_pop() {
-                            Some(LR::Left(x)) => vl.push(x),
-                            Some(LR::Right(x)) => vr.push(x),
-                            _ => {}
-                        }
-                    }
+                }
 
-                    let mut vl2 = vl.clone();
-                    let mut vr2 = vr.clone();
-                    vl2.sort();
-                    vr2.sort();
+                let mut vl2 = vl.clone();
+                let mut vr2 = vr.clone();
+                vl2.sort();
+                vr2.sort();
 
-                    assert_eq!(vl, vl2);
-                    assert_eq!(vr, vr2);
-                });
-            }
+                assert_eq!(vl, vl2);
+                assert_eq!(vr, vr2);
+            });
         });
     }
 
