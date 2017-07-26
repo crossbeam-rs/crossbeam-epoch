@@ -44,8 +44,8 @@ impl Registry {
             //
             // Both instructions have the effect of a full barrier, but the second one seems to be
             // faster in this particular case.
-            let previous = self.state.load(Relaxed);
-            self.state.compare_and_swap(previous, state, SeqCst);
+            let result = self.state.compare_and_swap(0, state, SeqCst);
+            debug_assert_eq!(0, result, "Registry::set_pinned()'s CAS should succeed.");
         } else {
             self.state.store(state, Relaxed);
             ::std::sync::atomic::fence(SeqCst);
