@@ -1,6 +1,6 @@
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 
-use {Atomic, Owned, Ptr, Namespace, Scope, unprotected};
+use {Atomic, Owned, Ptr, Scope, unprotected};
 use util::cache_padded::CachePadded;
 
 
@@ -20,12 +20,9 @@ pub struct List<T> {
     head: Atomic<Node<T>>,
 }
 
-pub struct Iter<'scope, N, T: 'scope>
-where
-    N: Namespace + 'scope,
-{
+pub struct Iter<'scope, T: 'scope> {
     /// The scope in which the iterator is operating.
-    scope: &'scope Scope<N>,
+    scope: &'scope Scope,
 
     /// Pointer from the predecessor to the current entry.
     pred: &'scope Atomic<Node<T>>,
@@ -54,10 +51,7 @@ impl<T> Node<T> {
     }
 
     /// Marks this entry as deleted.
-    pub fn delete<'scope, N>(&self, scope: &Scope<N>)
-    where
-        N: Namespace + 'scope,
-    {
+    pub fn delete<'scope>(&self, scope: &Scope) {
         self.0.next.fetch_or(1, Release, scope);
     }
 }
@@ -69,15 +63,12 @@ impl<T> List<T> {
     }
 
     /// Inserts `data` into the list.
-    pub fn insert<'scope, N>(
+    pub fn insert<'scope>(
         &'scope self,
         to: &'scope Atomic<Node<T>>,
         data: T,
-        scope: &'scope Scope<N>,
-    ) -> Ptr<'scope, Node<T>>
-    where
-        N: Namespace + 'scope,
-    {
+        scope: &'scope Scope,
+    ) -> Ptr<'scope, Node<T>> {
         let mut cur = Owned::new(Node::new(data));
         let mut next = to.load(Relaxed, scope);
 
@@ -93,13 +84,12 @@ impl<T> List<T> {
         }
     }
 
-    pub fn insert_head<'scope, N>(
+    pub fn insert_head<'scope>(
         &'scope self,
         data: T,
-        scope: &'scope Scope<N>,
+        scope: &'scope Scope,
     ) -> Ptr<'scope, Node<T>>
     where
-        N: Namespace + 'scope,
     {
         self.insert(&self.head, data, scope)
     }
@@ -113,9 +103,8 @@ impl<T> List<T> {
     /// 1. If a new datum is inserted during iteration, it may or may not be returned.
     /// 2. If a datum is deleted during iteration, it may or may not be returned.
     /// 3. It may not return all data if a concurrent thread continues to iterate the same list.
-    pub fn iter<'scope, N>(&'scope self, scope: &'scope Scope<N>) -> Iter<'scope, N, T>
+    pub fn iter<'scope>(&'scope self, scope: &'scope Scope) -> Iter<'scope, T>
     where
-        N: Namespace + 'scope,
     {
         let pred = &self.head;
         let curr = pred.load(Acquire, scope);
@@ -138,9 +127,8 @@ impl<T> Drop for List<T> {
     }
 }
 
-impl<'scope, N, T> Iter<'scope, N, T>
+impl<'scope, T> Iter<'scope, T>
 where
-    N: Namespace + 'scope,
 {
     pub fn next(&mut self) -> IterResult<T> {
         while let Some(c) = unsafe { self.curr.as_ref() } {

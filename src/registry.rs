@@ -1,7 +1,7 @@
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Relaxed, Release, SeqCst};
 
-use scope::Namespace;
+use global;
 
 #[derive(Default, Debug)]
 pub struct Registry {
@@ -30,8 +30,8 @@ impl Registry {
     ///
     /// Must not be called if the thread is already pinned!
     #[inline]
-    pub fn set_pinned<N: Namespace>(&self, namespace: N) {
-        let epoch = namespace.epoch().load(Relaxed);
+    pub fn set_pinned(&self) {
+        let epoch = global::epoch().load(Relaxed);
         let state = epoch | 1;
 
         // Now we must store `state` into `self.state`. It's important that any succeeding loads

@@ -1,7 +1,7 @@
 use std::{mem, ptr};
 use std::sync::atomic::Ordering::{Relaxed, Acquire, Release};
 
-use {Atomic, Owned, Ptr, Namespace, Scope, pin};
+use {Atomic, Owned, Ptr, Scope, pin, unprotected};
 use util::cache_padded::CachePadded;
 
 /// A Michael-Scott lock-free queue, with support for blocking `pop`s.
@@ -12,8 +12,7 @@ use util::cache_padded::CachePadded;
 // actual tail. Non-sentinel nodes are either all `Data` or all
 // `Blocked` (requests for data from blocked threads).
 #[derive(Debug)]
-pub struct MsQueue<N: Namespace, T> {
-    namespace: N,
+pub struct MsQueue<T> {
     head: CachePadded<Atomic<Node<T>>>,
     tail: CachePadded<Atomic<Node<T>>>,
 }
@@ -26,15 +25,14 @@ struct Node<T> {
 
 // Any particular `T` should never accessed concurrently, so no need
 // for Sync.
-unsafe impl<N: Namespace, T: Send> Sync for MsQueue<N, T> {}
-unsafe impl<N: Namespace, T: Send> Send for MsQueue<N, T> {}
+unsafe impl<T: Send> Sync for MsQueue<T> {}
+unsafe impl<T: Send> Send for MsQueue<T> {}
 
 
-impl<N: Namespace, T> MsQueue<N, T> {
+impl<T> MsQueue<T> {
     /// Create a new, empty queue.
-    pub fn new(namespace: N) -> MsQueue<N, T> {
+    pub fn new() -> MsQueue<T> {
         let q = MsQueue {
-            namespace: namespace,
             head: CachePadded::new(Atomic::null()),
             tail: CachePadded::new(Atomic::null()),
         };
@@ -43,7 +41,7 @@ impl<N: Namespace, T> MsQueue<N, T> {
             next: Atomic::null(),
         });
         unsafe {
-            namespace.unprotected(|scope| {
+            unprotected(|scope| {
                 let sentinel = sentinel.into_ptr(scope);
                 q.head.store(sentinel, Relaxed);
                 q.tail.store(sentinel, Relaxed);
@@ -61,7 +59,7 @@ impl<N: Namespace, T> MsQueue<N, T> {
         &self,
         onto: Ptr<Node<T>>,
         new: Owned<Node<T>>,
-        scope: &Scope<N>,
+        scope: &Scope,
     ) -> Result<(), Owned<Node<T>>> {
         // is `onto` the actual tail?
         let o = unsafe { onto.deref() };
@@ -84,7 +82,7 @@ impl<N: Namespace, T> MsQueue<N, T> {
 
     /// Add `t` to the back of the queue, possibly waking up threads
     /// blocked on `pop`.
-    pub fn push(&self, t: T, scope: &Scope<N>) {
+    pub fn push(&self, t: T, scope: &Scope) {
         let mut new = Owned::new(Node {
             data: t,
             next: Atomic::null(),
@@ -111,7 +109,7 @@ impl<N: Namespace, T> MsQueue<N, T> {
     #[inline(always)]
     // Attempt to pop a data node. `Ok(None)` if queue is empty or in blocking
     // mode; `Err(())` if lost race to pop.
-    fn pop_internal(&self, scope: &Scope<N>) -> Result<Option<T>, ()> {
+    fn pop_internal(&self, scope: &Scope) -> Result<Option<T>, ()> {
         let head = self.head.load(Acquire, scope);
         let h = unsafe { head.deref() };
         let next = h.next.load(Acquire, scope);
@@ -143,7 +141,7 @@ impl<N: Namespace, T> MsQueue<N, T> {
     /// Attempt to dequeue from the front.
     ///
     /// Returns `None` if the queue is observed to be empty.
-    pub fn try_pop(&self, scope: &Scope<N>) -> Option<T> {
+    pub fn try_pop(&self, scope: &Scope) -> Option<T> {
         loop {
             if let Ok(r) = self.pop_internal(scope) {
                 return r;
@@ -151,7 +149,7 @@ impl<N: Namespace, T> MsQueue<N, T> {
         }
     }
 
-    pub fn try_pop_if<F>(&self, condition: F, scope: &Scope<N>) -> Option<T>
+    pub fn try_pop_if<F>(&self, condition: F, scope: &Scope) -> Option<T>
     where
         F: Fn(&T) -> bool,
     {
@@ -173,10 +171,10 @@ impl<N: Namespace, T> MsQueue<N, T> {
     }
 }
 
-impl<N: Namespace, T> Drop for MsQueue<N, T> {
+impl<T> Drop for MsQueue<T> {
     fn drop(&mut self) {
         unsafe {
-            self.namespace.unprotected(|scope| {
+            unprotected(|scope| {
                 while let Some(_) = self.try_pop(scope) {}
 
                 // Destroy the remaining sentinel node.
