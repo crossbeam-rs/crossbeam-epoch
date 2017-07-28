@@ -11,8 +11,7 @@ use std::ops::Deref;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Relaxed, Acquire, Release, SeqCst};
 
-use mutator::Registry;
-use mutator::Scope;
+use mutator::{Realm, Registry, Scope};
 use sync::list::{List, IterResult};
 use util::cache_padded::CachePadded;
 
@@ -34,7 +33,10 @@ impl Epoch {
     ///
     /// Returns the current global epoch.
     #[cold]
-    pub fn try_advance<'scope>(&self, registries: &List<Registry>, scope: &Scope) -> usize {
+    pub fn try_advance<'scope, N>(&self, registries: &List<Registry>, scope: &Scope<N>) -> usize
+    where
+        N: Realm + 'scope,
+    {
         let epoch = self.epoch.load(Relaxed);
         ::std::sync::atomic::fence(SeqCst);
 

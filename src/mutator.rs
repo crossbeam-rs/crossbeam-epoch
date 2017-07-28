@@ -15,24 +15,111 @@
 //! When a mutator is pinned, a `Scope` is returned as a witness that the mutator is pinned.  Scopes
 //! are necessary for performing atomic operations, and for freeing/dropping locations.
 
-use std::cell::Cell;
+use std::cmp;
+use std::cell::{Cell, UnsafeCell};
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Relaxed, Release, SeqCst};
 
 use atomic::Ptr;
-use sync::list::Node;
+use garbage::{Garbage, Bag};
+use epoch::Epoch;
 use global;
+use sync::list::{List, Node};
+use sync::ms_queue::MsQueue;
 
 
 /// Number of pinnings after which a mutator will collect some global garbage.
 const PINS_BETWEEN_COLLECT: usize = 128;
 
+/// Number of bags to destroy.
+const COLLECT_STEPS: usize = 8;
+
+
+/// Garbage collection realm
+pub trait Realm: Copy {
+    fn registries(&self) -> &List<Registry>;
+    fn garbages(&self) -> &MsQueue<Self, (usize, Bag)>;
+    fn epoch(&self) -> &Epoch;
+
+    #[inline]
+    fn push_bag<'scope>(self, bag: &mut Bag, scope: &'scope Scope<Self>) {
+        let epoch = self.epoch().load(Relaxed);
+        let bag = ::std::mem::replace(bag, Bag::new());
+        ::std::sync::atomic::fence(SeqCst);
+        self.garbages().push((epoch, bag), scope);
+    }
+
+    /// Collect several bags from the global old garbage queue and destroys their objects.
+    /// Note: This may itself produce garbage and in turn allocate new bags.
+    #[inline]
+    fn collect(self, scope: &Scope<Self>) {
+        let epoch = self.epoch().try_advance(self.registries(), scope);
+        let garbages = self.garbages();
+        let condition = |bag: &(usize, Bag)| {
+            // A pinned thread can witness at most one epoch advancement. Therefore, any bag that is
+            // within one epoch of the current one cannot be destroyed yet.
+            let diff = epoch.wrapping_sub(bag.0);
+            cmp::min(diff, 0usize.wrapping_sub(diff)) > 2
+        };
+
+        for _ in 0..COLLECT_STEPS {
+            match garbages.try_pop_if(&condition, scope) {
+                None => break,
+                Some(bag) => drop(bag),
+            }
+        }
+    }
+
+    /// Returns a [`Scope`] without pinning any mutator.
+    ///
+    /// Sometimes, we'd like to have longer-lived scopes in which we know our thread is the only one
+    /// accessing atomics. This is true e.g. when destructing a big data structure, or when
+    /// constructing it from a long iterator. In such cases we don't need to be overprotective
+    /// because there is no fear of other threads concurrently destroying objects.
+    ///
+    /// Function `unprotected` is *unsafe* because we must promise that no other thread is accessing
+    /// the Atomics and objects at the same time. The function is safe to use only if (1) the
+    /// locations that we access should not be deallocated by concurrent mutators, and (2) the
+    /// locations that we deallocate should not be accessed by concurrent mutators.
+    ///
+    /// Just like with the safe epoch::pin function, unprotected use of atomics is enclosed within a
+    /// scope so that pointers created within it don't leak out or get mixed with pointers from
+    /// other scopes.
+    #[inline]
+    unsafe fn unprotected<F, R>(self, f: F) -> R
+    where
+        F: FnOnce(&Scope<Self>) -> R,
+    {
+        let mut bag = Bag::new();
+        let result = self.unprotected_with_bag(&mut bag, f);
+        drop(bag);
+        result
+    }
+
+    /// Returns a [`Scope`] without pinning any mutator, with arbitrary bag.
+    #[inline]
+    unsafe fn unprotected_with_bag<F, R>(self, bag: &mut Bag, f: F) -> R
+    where
+        F: FnOnce(&Scope<Self>) -> R,
+    {
+        let scope = &Scope {
+            realm: self,
+            bag: bag,
+        };
+        f(scope)
+    }
+}
+
 
 /// Entity that changes shared locations.
-pub struct Mutator<'scope> {
+pub struct Mutator<'scope, N: Realm + 'scope> {
+    /// This mutator's realm
+    realm: N,
     /// This mutator's entry in the registry list.
     registry: &'scope Node<Registry>,
-    /// Whether the mutator is currently pinned.
+    /// The local garbage objects that will be later freed.
+    bag: UnsafeCell<Bag>,
+    /// Whether the thread is currently pinned.
     is_pinned: Cell<bool>,
     /// Total number of pinnings performed.
     pin_count: Cell<usize>,
@@ -57,27 +144,28 @@ pub struct Registry {
 ///
 /// [`Atomic`]: struct.Atomic.html
 #[derive(Debug)]
-pub struct Scope {
-    _private: *mut (), // !Send + !Sync
-
-    // FIXME(jeehoonkang): it should have a garbage bag.
+pub struct Scope<N: Realm> {
+    realm: N,
+    bag: *mut Bag, // !Send + !Sync
 }
 
 
-impl<'scope> Mutator<'scope> {
-    pub fn new() -> Self {
+impl<'scope, N> Mutator<'scope, N>
+where
+    N: Realm + 'scope,
+{
+    pub fn new(n: N) -> Self {
         Mutator {
+            realm: n,
             registry: unsafe {
-                // Since we dereference no pointers in this block, it is safe to use `unprotected`.
-                //
-                // FIXME(jeehoonkang): in fact, since we create no garbages, it is safe to use
-                // `unprotected_with_bag` with an invalid bag.
-                unprotected(|scope| {
-                    &*global::registries()
-                        .insert_head(Registry::new(), scope)
-                        .as_raw()
+                // Since we dereference no pointers in this block and create no garbages, it is safe
+                // to use `unprotected_with_bag` with an invalid bag.
+                let mut bag = ::std::mem::zeroed::<Bag>();
+                n.unprotected_with_bag(&mut bag, |scope| {
+                    &*n.registries().insert_head(Registry::new(), scope).as_raw()
                 })
             },
+            bag: UnsafeCell::new(Bag::new()),
             is_pinned: Cell::new(false),
             pin_count: Cell::new(0),
         }
@@ -103,10 +191,13 @@ impl<'scope> Mutator<'scope> {
     /// [`Atomic`]: struct.Atomic.html
     pub fn pin<F, R>(&self, f: F) -> R
     where
-        F: FnOnce(&Scope) -> R,
+        F: FnOnce(&Scope<N>) -> R,
     {
         let registry = self.registry.get();
-        let scope = &Scope { _private: ::std::ptr::null_mut() };
+        let scope = &Scope {
+            realm: self.realm,
+            bag: self.bag.get(),
+        };
 
         let was_pinned = self.is_pinned.get();
         if !was_pinned {
@@ -120,7 +211,7 @@ impl<'scope> Mutator<'scope> {
 
             // If the counter progressed enough, try advancing the epoch and collecting garbage.
             if count % PINS_BETWEEN_COLLECT == 0 {
-                global::collect(scope);
+                self.realm.collect(scope);
             }
         }
 
@@ -142,21 +233,25 @@ impl<'scope> Mutator<'scope> {
     }
 }
 
-impl<'scope> Drop for Mutator<'scope> {
+impl<'scope, N: Realm> Drop for Mutator<'scope, N> {
     fn drop(&mut self) {
         // Now that the mutator is exiting, we must move the local bag into the global garbage
         // queue. Also, let's try advancing the epoch and help free some garbage.
 
-        self.pin(|scope| {
-            // Spare some cycles on garbage collection.
-            global::collect(scope);
+        unsafe {
+            let bag = &mut *self.bag.get();
 
-            // Unregister the mutator by marking this entry as deleted.
-            self.registry.delete(scope);
+            self.pin(|scope| {
+                // Spare some cycles on garbage collection.
+                self.realm.collect(scope);
 
-            // Push the local bag into the global garbage queue.
-            unimplemented!();
-        });
+                // Unregister the mutator by marking this entry as deleted.
+                self.registry.delete(scope);
+
+                // Push the local bag into the global garbage queue.
+                self.realm.push_bag(bag, scope);
+            });
+        }
     }
 }
 
@@ -212,7 +307,23 @@ impl Registry {
     }
 }
 
-impl Scope {
+impl<N> Scope<N>
+where
+    N: Realm,
+{
+    unsafe fn get_bag(&self) -> &mut Bag {
+        &mut *self.bag
+    }
+
+    unsafe fn defer_garbage(&self, mut garbage: Garbage) {
+        let bag = self.get_bag();
+
+        while let Err(g) = bag.try_push(garbage) {
+            self.realm.push_bag(bag, self);
+            garbage = g;
+        }
+    }
+
     /// Deferred deallocation of heap-allocated object `ptr`.
     ///
     /// The specified object is an array allocated at address `object` and consists of `count`
@@ -227,7 +338,7 @@ impl Scope {
     /// [`Bag`]: struct.Bag.html
     /// [`flush`]: fn.flush.html
     pub unsafe fn defer_free<T>(&self, ptr: Ptr<T>) {
-        unimplemented!()
+        self.defer_garbage(Garbage::new_free(ptr.as_raw() as *mut T, 1))
     }
 
     /// Deferred destruction and deallocation of heap-allocated object `ptr`.
@@ -235,12 +346,12 @@ impl Scope {
     /// The specified object is an array allocated at address `object` and consists of `count`
     /// elements of type `T`.
     pub unsafe fn defer_drop<T: Send + 'static>(&self, ptr: Ptr<T>) {
-        unimplemented!()
+        self.defer_garbage(Garbage::new_drop(ptr.as_raw() as *mut T, 1))
     }
 
     /// Deferred execution of an arbitrary function `f`.
     pub unsafe fn defer<F: FnOnce() + Send + 'static>(&self, f: F) {
-        unimplemented!()
+        self.defer_garbage(Garbage::new(f))
     }
 
     /// Flushes all garbage in the thread-local storage into the global garbage queue, attempts to
@@ -255,31 +366,15 @@ impl Scope {
     /// [`defer_free`]: fn.defer_free.html
     /// [`defer_drop`]: fn.defer_drop.html
     pub fn flush(&self) {
-        unimplemented!()
-    }
-}
+        unsafe {
+            let bag = self.get_bag();
+            if !bag.is_empty() {
+                self.realm.push_bag(bag, self);
+            }
+        }
 
-/// Returns a [`Scope`] without pinning any mutator.
-///
-/// Sometimes, we'd like to have longer-lived scopes in which we know our thread is the only one
-/// accessing atomics. This is true e.g. when destructing a big data structure, or when constructing
-/// it from a long iterator. In such cases we don't need to be overprotective because there is no
-/// fear of other threads concurrently destroying objects.
-///
-/// Function `unprotected` is *unsafe* because we must promise that no other thread is accessing the
-/// Atomics and objects at the same time. The function is safe to use only if (1) the locations that
-/// we access should not be deallocated by concurrent mutators, and (2) the locations that we
-/// deallocate should not be accessed by concurrent mutators.
-///
-/// Just like with the safe epoch::pin function, unprotected use of atomics is enclosed within a
-/// scope so that pointers created within it don't leak out or get mixed with pointers from other
-/// scopes.
-pub unsafe fn unprotected<F, R>(f: F) -> R
-where
-    F: FnOnce(&Scope) -> R,
-{
-    let scope = &Scope { _private: ::std::ptr::null_mut() };
-    f(scope)
+        self.realm.collect(self);
+    }
 }
 
 

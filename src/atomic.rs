@@ -5,7 +5,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
-use mutator::Scope;
+use mutator::{Realm, Scope};
 
 /// Given ordering for the success case in a compare-exchange operation, returns the strongest
 /// appropriate ordering for the failure case.
@@ -216,8 +216,10 @@ impl<T> Atomic<T> {
     ///     let p = a.load(SeqCst, scope);
     /// });
     /// ```
-    pub fn load<'scope>(&self, ord: Ordering, _: &'scope Scope) -> Ptr<'scope, T>
-where {
+    pub fn load<'scope, N>(&self, ord: Ordering, _: &'scope Scope<N>) -> Ptr<'scope, T>
+    where
+        N: Realm + 'scope,
+    {
         Ptr::from_data(self.data.load(ord))
     }
 
@@ -281,8 +283,10 @@ where {
     ///     let p = a.swap(Ptr::null(), SeqCst, scope);
     /// });
     /// ```
-    pub fn swap<'scope>(&self, new: Ptr<T>, ord: Ordering, _: &'scope Scope) -> Ptr<'scope, T>
-where {
+    pub fn swap<'scope, N>(&self, new: Ptr<T>, ord: Ordering, _: &'scope Scope<N>) -> Ptr<'scope, T>
+    where
+        N: Realm + 'scope,
+    {
         Ptr::from_data(self.data.swap(new.data, ord))
     }
 
@@ -309,14 +313,15 @@ where {
     ///     let res = a.compare_and_set(curr, Ptr::null(), SeqCst, scope);
     /// });
     /// ```
-    pub fn compare_and_set<'scope, O>(
+    pub fn compare_and_set<'scope, N, O>(
         &self,
         current: Ptr<T>,
         new: Ptr<T>,
         ord: O,
-        _: &'scope Scope,
+        _: &'scope Scope<N>,
     ) -> Result<(), Ptr<'scope, T>>
     where
+        N: Realm,
         O: CompareAndSetOrdering,
     {
         match self.data.compare_exchange(
@@ -361,14 +366,15 @@ where {
     ///     }
     /// });
     /// ```
-    pub fn compare_and_set_weak<'scope, O>(
+    pub fn compare_and_set_weak<'scope, N, O>(
         &self,
         current: Ptr<T>,
         new: Ptr<T>,
         ord: O,
-        _: &'scope Scope,
+        _: &'scope Scope<N>,
     ) -> Result<(), Ptr<'scope, T>>
     where
+        N: Realm,
         O: CompareAndSetOrdering,
     {
         match self.data.compare_exchange_weak(
@@ -406,14 +412,15 @@ where {
     ///     let res = a.compare_and_set_owned(curr, Owned::new(5678), SeqCst, scope);
     /// });
     /// ```
-    pub fn compare_and_set_owned<'scope, O>(
+    pub fn compare_and_set_owned<'scope, N, O>(
         &self,
         current: Ptr<T>,
         new: Owned<T>,
         ord: O,
-        _: &'scope Scope,
+        _: &'scope Scope<N>,
     ) -> Result<Ptr<'scope, T>, (Ptr<'scope, T>, Owned<T>)>
     where
+        N: Realm,
         O: CompareAndSetOrdering,
     {
         match self.data.compare_exchange(
@@ -470,14 +477,15 @@ where {
     ///     }
     /// });
     /// ```
-    pub fn compare_and_set_weak_owned<'scope, O>(
+    pub fn compare_and_set_weak_owned<'scope, N, O>(
         &self,
         current: Ptr<T>,
         new: Owned<T>,
         ord: O,
-        _: &'scope Scope,
+        _: &'scope Scope<N>,
     ) -> Result<Ptr<'scope, T>, (Ptr<'scope, T>, Owned<T>)>
     where
+        N: Realm,
         O: CompareAndSetOrdering,
     {
         match self.data.compare_exchange_weak(
@@ -517,8 +525,15 @@ where {
     ///     assert_eq!(a.load(SeqCst, scope).tag(), 2);
     /// });
     /// ```
-    pub fn fetch_and<'scope>(&self, val: usize, ord: Ordering, _: &'scope Scope) -> Ptr<'scope, T>
-where {
+    pub fn fetch_and<'scope, N>(
+        &self,
+        val: usize,
+        ord: Ordering,
+        _: &'scope Scope<N>,
+    ) -> Ptr<'scope, T>
+    where
+        N: Realm + 'scope,
+    {
         validate_tag::<T>(val);
         Ptr::from_data(self.data.fetch_and(val, ord))
     }
@@ -545,8 +560,15 @@ where {
     ///     assert_eq!(a.load(SeqCst, scope).tag(), 3);
     /// });
     /// ```
-    pub fn fetch_or<'scope>(&self, val: usize, ord: Ordering, _: &'scope Scope) -> Ptr<'scope, T>
-where {
+    pub fn fetch_or<'scope, N>(
+        &self,
+        val: usize,
+        ord: Ordering,
+        _: &'scope Scope<N>,
+    ) -> Ptr<'scope, T>
+    where
+        N: Realm + 'scope,
+    {
         validate_tag::<T>(val);
         Ptr::from_data(self.data.fetch_or(val, ord))
     }
@@ -573,8 +595,15 @@ where {
     ///     assert_eq!(a.load(SeqCst, scope).tag(), 2);
     /// });
     /// ```
-    pub fn fetch_xor<'scope>(&self, val: usize, ord: Ordering, _: &'scope Scope) -> Ptr<'scope, T>
-where {
+    pub fn fetch_xor<'scope, N>(
+        &self,
+        val: usize,
+        ord: Ordering,
+        _: &'scope Scope<N>,
+    ) -> Ptr<'scope, T>
+    where
+        N: Realm + 'scope,
+    {
         validate_tag::<T>(val);
         Ptr::from_data(self.data.fetch_xor(val, ord))
     }
@@ -697,8 +726,10 @@ impl<T> Owned<T> {
     /// ```
     ///
     /// [`Ptr`]: struct.Ptr.html
-    pub fn into_ptr<'scope>(self, _: &'scope Scope) -> Ptr<'scope, T>
-where {
+    pub fn into_ptr<'scope, N>(self, _: &'scope Scope<N>) -> Ptr<'scope, T>
+    where
+        N: Realm + 'scope,
+    {
         let data = self.data;
         mem::forget(self);
         Ptr::from_data(data)

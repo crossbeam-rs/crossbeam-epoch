@@ -34,15 +34,20 @@
 
 #[macro_use(defer)]
 extern crate scopeguard;
+extern crate boxfnonce;
+extern crate arrayvec;
 
 #[macro_use]
 pub mod util;
 mod atomic;
 mod mutator;
 mod epoch;
+mod garbage;
 mod global;
+mod user;
 pub mod sync;
 
 pub use self::atomic::{Atomic, CompareAndSetOrdering, Owned, Ptr};
-pub use self::global::{pin, is_pinned};
-pub use self::mutator::{Scope, unprotected};
+pub use self::mutator::{Realm, Mutator, Scope};
+pub use self::global::{pin, is_pinned, unprotected, GlobalRealm};
+pub use self::user::with_realm;

@@ -1,7 +1,7 @@
 use std::{mem, ptr};
 use std::sync::atomic::Ordering::{Relaxed, Acquire, Release};
 
-use {Atomic, Owned, Ptr, Scope, pin, unprotected};
+use {Atomic, Owned, Ptr, Realm, Scope, pin};
 use util::cache_padded::CachePadded;
 
 /// A Michael-Scott lock-free queue, with support for blocking `pop`s.
@@ -12,7 +12,8 @@ use util::cache_padded::CachePadded;
 // actual tail. Non-sentinel nodes are either all `Data` or all
 // `Blocked` (requests for data from blocked threads).
 #[derive(Debug)]
-pub struct MsQueue<T> {
+pub struct MsQueue<N: Realm, T> {
+    realm: N,
     head: CachePadded<Atomic<Node<T>>>,
     tail: CachePadded<Atomic<Node<T>>>,
 }
@@ -25,14 +26,15 @@ struct Node<T> {
 
 // Any particular `T` should never accessed concurrently, so no need
 // for Sync.
-unsafe impl<T: Send> Sync for MsQueue<T> {}
-unsafe impl<T: Send> Send for MsQueue<T> {}
+unsafe impl<N: Realm, T: Send> Sync for MsQueue<N, T> {}
+unsafe impl<N: Realm, T: Send> Send for MsQueue<N, T> {}
 
 
-impl<T> MsQueue<T> {
+impl<N: Realm, T> MsQueue<N, T> {
     /// Create a new, empty queue.
-    pub fn new() -> MsQueue<T> {
+    pub fn new(realm: N) -> MsQueue<N, T> {
         let q = MsQueue {
+            realm: realm,
             head: CachePadded::new(Atomic::null()),
             tail: CachePadded::new(Atomic::null()),
         };
@@ -41,7 +43,7 @@ impl<T> MsQueue<T> {
             next: Atomic::null(),
         });
         unsafe {
-            unprotected(|scope| {
+            realm.unprotected(|scope| {
                 let sentinel = sentinel.into_ptr(scope);
                 q.head.store(sentinel, Relaxed);
                 q.tail.store(sentinel, Relaxed);
@@ -59,7 +61,7 @@ impl<T> MsQueue<T> {
         &self,
         onto: Ptr<Node<T>>,
         new: Owned<Node<T>>,
-        scope: &Scope,
+        scope: &Scope<N>,
     ) -> Result<(), Owned<Node<T>>> {
         // is `onto` the actual tail?
         let o = unsafe { onto.deref() };
@@ -82,7 +84,7 @@ impl<T> MsQueue<T> {
 
     /// Add `t` to the back of the queue, possibly waking up threads
     /// blocked on `pop`.
-    pub fn push(&self, t: T, scope: &Scope) {
+    pub fn push(&self, t: T, scope: &Scope<N>) {
         let mut new = Owned::new(Node {
             data: t,
             next: Atomic::null(),
@@ -109,7 +111,7 @@ impl<T> MsQueue<T> {
     #[inline(always)]
     // Attempt to pop a data node. `Ok(None)` if queue is empty or in blocking
     // mode; `Err(())` if lost race to pop.
-    fn pop_internal(&self, scope: &Scope) -> Result<Option<T>, ()> {
+    fn pop_internal(&self, scope: &Scope<N>) -> Result<Option<T>, ()> {
         let head = self.head.load(Acquire, scope);
         let h = unsafe { head.deref() };
         let next = h.next.load(Acquire, scope);
@@ -141,7 +143,7 @@ impl<T> MsQueue<T> {
     /// Attempt to dequeue from the front.
     ///
     /// Returns `None` if the queue is observed to be empty.
-    pub fn try_pop(&self, scope: &Scope) -> Option<T> {
+    pub fn try_pop(&self, scope: &Scope<N>) -> Option<T> {
         loop {
             if let Ok(r) = self.pop_internal(scope) {
                 return r;
@@ -149,7 +151,7 @@ impl<T> MsQueue<T> {
         }
     }
 
-    pub fn try_pop_if<F>(&self, condition: F, scope: &Scope) -> Option<T>
+    pub fn try_pop_if<F>(&self, condition: F, scope: &Scope<N>) -> Option<T>
     where
         F: Fn(&T) -> bool,
     {
@@ -171,10 +173,10 @@ impl<T> MsQueue<T> {
     }
 }
 
-impl<T> Drop for MsQueue<T> {
+impl<N: Realm, T> Drop for MsQueue<N, T> {
     fn drop(&mut self) {
         unsafe {
-            unprotected(|scope| {
+            self.realm.unprotected(|scope| {
                 while let Some(_) = self.try_pop(scope) {}
 
                 // Destroy the remaining sentinel node.
@@ -188,16 +190,17 @@ impl<T> Drop for MsQueue<T> {
 
 #[cfg(test)]
 mod test {
-    use util::scoped;
     use super::*;
+    use global::GlobalRealm;
+    use util::scoped;
 
     struct MsQueue<T> {
-        queue: super::MsQueue<T>,
+        queue: super::MsQueue<GlobalRealm, T>,
     }
 
     impl<T> MsQueue<T> {
         pub fn new() -> MsQueue<T> {
-            MsQueue { queue: super::MsQueue::new() }
+            MsQueue { queue: super::MsQueue::new(GlobalRealm::new()) }
         }
 
         pub fn push(&self, t: T) {

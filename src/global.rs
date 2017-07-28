@@ -6,33 +6,70 @@
 //!
 //! `registries` is the list is the registered mutators, and `epoch` is the global epoch.
 
-use mutator::{Mutator, Registry, Scope};
 use epoch::Epoch;
+use garbage::Bag;
+use mutator::{self, Realm, Registry};
+
 use sync::list::List;
+use sync::ms_queue::MsQueue;
+
+
+type Mutator = mutator::Mutator<'static, GlobalRealm>;
+type Scope = mutator::Scope<GlobalRealm>;
 
 
 /// registries() returns a reference to the head pointer of the list of mutator registries.
 lazy_static_null!(pub, registries, List<Registry>);
 
+/// garbages() returns a reference to the global garbage queue, which is lazily initialized.
+lazy_static!(pub, garbages,
+             MsQueue<GlobalRealm, (usize, Bag)>,
+             MsQueue::new(GlobalRealm::new()));
+
 /// epoch() returns a reference to the global epoch.
 lazy_static_null!(pub, epoch, Epoch);
 
 
-/// Collect several bags from the global old garbage queue and destroys their objects.
-/// Note: This may itself produce garbage and in turn allocate new bags.
-pub fn collect(scope: &Scope) {
-    unimplemented!()
+#[derive(Clone, Copy, Default, Debug)]
+pub struct GlobalRealm {}
+
+impl GlobalRealm {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl Realm for GlobalRealm {
+    fn registries(&self) -> &List<Registry> {
+        registries()
+    }
+
+    fn garbages(&self) -> &MsQueue<Self, (usize, Bag)> {
+        unsafe { garbages::get_unsafe() }
+    }
+
+    fn epoch(&self) -> &Epoch {
+        epoch()
+    }
+}
+
+pub unsafe fn unprotected<F, R>(f: F) -> R
+where
+    F: FnOnce(&Scope) -> R,
+{
+    GlobalRealm::new().unprotected(f)
 }
 
 
 thread_local! {
     /// The per-thread mutator.
-    static MUTATOR: Mutator<'static> = {
+    static MUTATOR: Mutator = {
         // Ensure that the registries and the epoch are properly initialized.
         registries();
+        garbages::get();
         epoch();
 
-        Mutator::new()
+        Mutator::new(GlobalRealm::new())
     }
 }
 
@@ -56,7 +93,6 @@ mod tests {
     use std::sync::atomic::Ordering::Relaxed;
 
     use super::*;
-    use epoch;
 
     #[test]
     fn pin_reentrant() {
