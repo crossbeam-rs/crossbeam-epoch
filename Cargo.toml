@@ -11,5 +11,12 @@ description = "Epoch-based garbage collection"
 
 [features]
 nightly = []
+strict_gc = []
 
 [dependencies]
+scopeguard = "0.3"
+boxfnonce = "0.0.3"
+arrayvec = "0.3.23"
+
+[dev-dependencies]
+rand = "0.3"
