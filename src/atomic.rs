@@ -5,7 +5,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
-use scope::Scope;
+use mutator::Scope;
 
 /// Given ordering for the success case in a compare-exchange operation, returns the strongest
 /// appropriate ordering for the failure case.
@@ -217,8 +217,7 @@ impl<T> Atomic<T> {
     /// });
     /// ```
     pub fn load<'scope>(&self, ord: Ordering, _: &'scope Scope) -> Ptr<'scope, T>
-    where
-    {
+where {
         Ptr::from_data(self.data.load(ord))
     }
 
@@ -283,8 +282,7 @@ impl<T> Atomic<T> {
     /// });
     /// ```
     pub fn swap<'scope>(&self, new: Ptr<T>, ord: Ordering, _: &'scope Scope) -> Ptr<'scope, T>
-    where
-    {
+where {
         Ptr::from_data(self.data.swap(new.data, ord))
     }
 
@@ -519,14 +517,8 @@ impl<T> Atomic<T> {
     ///     assert_eq!(a.load(SeqCst, scope).tag(), 2);
     /// });
     /// ```
-    pub fn fetch_and<'scope>(
-        &self,
-        val: usize,
-        ord: Ordering,
-        _: &'scope Scope,
-    ) -> Ptr<'scope, T>
-    where
-    {
+    pub fn fetch_and<'scope>(&self, val: usize, ord: Ordering, _: &'scope Scope) -> Ptr<'scope, T>
+where {
         validate_tag::<T>(val);
         Ptr::from_data(self.data.fetch_and(val, ord))
     }
@@ -553,14 +545,8 @@ impl<T> Atomic<T> {
     ///     assert_eq!(a.load(SeqCst, scope).tag(), 3);
     /// });
     /// ```
-    pub fn fetch_or<'scope>(
-        &self,
-        val: usize,
-        ord: Ordering,
-        _: &'scope Scope,
-    ) -> Ptr<'scope, T>
-    where
-    {
+    pub fn fetch_or<'scope>(&self, val: usize, ord: Ordering, _: &'scope Scope) -> Ptr<'scope, T>
+where {
         validate_tag::<T>(val);
         Ptr::from_data(self.data.fetch_or(val, ord))
     }
@@ -587,14 +573,8 @@ impl<T> Atomic<T> {
     ///     assert_eq!(a.load(SeqCst, scope).tag(), 2);
     /// });
     /// ```
-    pub fn fetch_xor<'scope>(
-        &self,
-        val: usize,
-        ord: Ordering,
-        _: &'scope Scope,
-    ) -> Ptr<'scope, T>
-    where
-    {
+    pub fn fetch_xor<'scope>(&self, val: usize, ord: Ordering, _: &'scope Scope) -> Ptr<'scope, T>
+where {
         validate_tag::<T>(val);
         Ptr::from_data(self.data.fetch_xor(val, ord))
     }
@@ -718,8 +698,7 @@ impl<T> Owned<T> {
     ///
     /// [`Ptr`]: struct.Ptr.html
     pub fn into_ptr<'scope>(self, _: &'scope Scope) -> Ptr<'scope, T>
-    where
-    {
+where {
         let data = self.data;
         mem::forget(self);
         Ptr::from_data(data)

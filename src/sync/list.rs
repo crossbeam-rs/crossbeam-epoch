@@ -89,8 +89,7 @@ impl<T> List<T> {
         data: T,
         scope: &'scope Scope,
     ) -> Ptr<'scope, Node<T>>
-    where
-    {
+where {
         self.insert(&self.head, data, scope)
     }
 
@@ -104,8 +103,7 @@ impl<T> List<T> {
     /// 2. If a datum is deleted during iteration, it may or may not be returned.
     /// 3. It may not return all data if a concurrent thread continues to iterate the same list.
     pub fn iter<'scope>(&'scope self, scope: &'scope Scope) -> Iter<'scope, T>
-    where
-    {
+where {
         let pred = &self.head;
         let curr = pred.load(Acquire, scope);
         Iter { scope, pred, curr }
@@ -127,9 +125,7 @@ impl<T> Drop for List<T> {
     }
 }
 
-impl<'scope, T> Iter<'scope, T>
-where
-{
+impl<'scope, T> Iter<'scope, T> {
     pub fn next(&mut self) -> IterResult<T> {
         while let Some(c) = unsafe { self.curr.as_ref() } {
             let succ = c.0.next.load(Acquire, self.scope);

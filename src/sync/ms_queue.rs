@@ -188,17 +188,16 @@ impl<T> Drop for MsQueue<T> {
 
 #[cfg(test)]
 mod test {
-    use GlobalNamespace;
     use util::scoped;
     use super::*;
 
     struct MsQueue<T> {
-        queue: super::MsQueue<GlobalNamespace, T>,
+        queue: super::MsQueue<T>,
     }
 
     impl<T> MsQueue<T> {
         pub fn new() -> MsQueue<T> {
-            MsQueue { queue: super::MsQueue::new(GlobalNamespace::new()) }
+            MsQueue { queue: super::MsQueue::new() }
         }
 
         pub fn push(&self, t: T) {
