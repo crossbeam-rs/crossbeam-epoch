@@ -73,7 +73,7 @@ impl<'scope> Mutator<'scope> {
                 // FIXME(jeehoonkang): in fact, since we create no garbages, it is safe to use
                 // `unprotected_with_bag` with an invalid bag.
                 unprotected(|scope| {
-                    &*global::registries()
+                    &*global::REGISTRIES
                         .insert_head(Registry::new(), scope)
                         .as_raw()
                 })
@@ -182,7 +182,7 @@ impl Registry {
     /// Must not be called if the mutator is already pinned!
     #[inline]
     pub fn set_pinned(&self) {
-        let epoch = global::epoch().load(Relaxed);
+        let epoch = global::EPOCH.load(Relaxed);
         let state = epoch | 1;
 
         // Now we must store `state` into `self.state`. It's important that any succeeding loads
@@ -215,9 +215,6 @@ impl Registry {
 impl Scope {
     /// Deferred deallocation of heap-allocated object `ptr`.
     ///
-    /// The specified object is an array allocated at address `object` and consists of `count`
-    /// elements of type `T`.
-    ///
     /// This function inserts the object into a mutator-local [`Bag`]. When the bag becomes full,
     /// the bag is flushed into the globally shared queue of bags.
     ///
@@ -231,9 +228,6 @@ impl Scope {
     }
 
     /// Deferred destruction and deallocation of heap-allocated object `ptr`.
-    ///
-    /// The specified object is an array allocated at address `object` and consists of `count`
-    /// elements of type `T`.
     pub unsafe fn defer_drop<T: Send + 'static>(&self, ptr: Ptr<T>) {
         unimplemented!()
     }
@@ -243,11 +237,12 @@ impl Scope {
         unimplemented!()
     }
 
-    /// Flushes all garbage in the thread-local storage into the global garbage queue, attempts to
+    /// Flushes all garbage in the mutator-local storage into the global garbage queue, attempts to
     /// advance the epoch, and collects some garbage.
     ///
     /// Even though flushing can be explicitly called, it is also automatically triggered when the
-    /// thread-local storage fills up or when we pin the current thread a specific number of times.
+    /// mutator-local storage fills up or when we pin the current mutator a specific number of
+    /// times.
     ///
     /// It is wise to flush the bag just after passing a very large object to [`defer_free`] or
     /// [`defer_drop`], so that it isn't sitting in the local bag for a long time.

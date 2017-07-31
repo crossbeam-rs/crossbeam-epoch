@@ -88,8 +88,7 @@ impl<T> List<T> {
         &'scope self,
         data: T,
         scope: &'scope Scope,
-    ) -> Ptr<'scope, Node<T>>
-where {
+    ) -> Ptr<'scope, Node<T>> {
         self.insert(&self.head, data, scope)
     }
 
@@ -102,8 +101,7 @@ where {
     /// 1. If a new datum is inserted during iteration, it may or may not be returned.
     /// 2. If a datum is deleted during iteration, it may or may not be returned.
     /// 3. It may not return all data if a concurrent thread continues to iterate the same list.
-    pub fn iter<'scope>(&'scope self, scope: &'scope Scope) -> Iter<'scope, T>
-where {
+    pub fn iter<'scope>(&'scope self, scope: &'scope Scope) -> Iter<'scope, T> {
         let pred = &self.head;
         let curr = pred.load(Acquire, scope);
         Iter { scope, pred, curr }
@@ -117,10 +115,10 @@ impl<T> Drop for List<T> {
                 let mut curr = self.head.load(Relaxed, scope);
                 while let Some(c) = curr.as_ref() {
                     let succ = c.0.next.load(Relaxed, scope);
-                    scope.defer_free(curr);
+                    drop(Box::from_raw(curr.as_raw() as *mut Node<T>));
                     curr = succ;
                 }
-            })
+            });
         }
     }
 }

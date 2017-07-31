@@ -11,11 +11,12 @@ use epoch::Epoch;
 use sync::list::List;
 
 
-/// registries() returns a reference to the head pointer of the list of mutator registries.
-lazy_static_null!(pub, registries, List<Registry>);
-
-/// epoch() returns a reference to the global epoch.
-lazy_static_null!(pub, epoch, Epoch);
+lazy_static! {
+    /// REGISTRIES is the head pointer of the list of mutator registries.
+    pub static ref REGISTRIES: List<Registry> = List::new();
+    /// EPOCH is a reference to the global epoch.
+    pub static ref EPOCH: Epoch = Epoch::new();
+}
 
 
 /// Collect several bags from the global old garbage queue and destroys their objects.
@@ -27,13 +28,7 @@ pub fn collect(scope: &Scope) {
 
 thread_local! {
     /// The per-thread mutator.
-    static MUTATOR: Mutator<'static> = {
-        // Ensure that the registries and the epoch are properly initialized.
-        registries();
-        epoch();
-
-        Mutator::new()
-    }
+    static MUTATOR: Mutator<'static> = Mutator::new();
 }
 
 /// Pin the current thread.
@@ -56,7 +51,6 @@ mod tests {
     use std::sync::atomic::Ordering::Relaxed;
 
     use super::*;
-    use epoch;
 
     #[test]
     fn pin_reentrant() {
@@ -76,9 +70,9 @@ mod tests {
             .map(|_| {
                 thread::spawn(|| for _ in 0..500_000 {
                     pin(|scope| {
-                        let before = epoch().load(Relaxed);
-                        epoch().try_advance(registries(), scope);
-                        let after = epoch().load(Relaxed);
+                        let before = EPOCH.load(Relaxed);
+                        EPOCH.try_advance(&REGISTRIES, scope);
+                        let after = EPOCH.load(Relaxed);
 
                         assert!(after.wrapping_sub(before) <= 2);
                     });

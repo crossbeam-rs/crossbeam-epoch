@@ -216,8 +216,7 @@ impl<T> Atomic<T> {
     ///     let p = a.load(SeqCst, scope);
     /// });
     /// ```
-    pub fn load<'scope>(&self, ord: Ordering, _: &'scope Scope) -> Ptr<'scope, T>
-where {
+    pub fn load<'scope>(&self, ord: Ordering, _: &'scope Scope) -> Ptr<'scope, T> {
         Ptr::from_data(self.data.load(ord))
     }
 
@@ -281,8 +280,7 @@ where {
     ///     let p = a.swap(Ptr::null(), SeqCst, scope);
     /// });
     /// ```
-    pub fn swap<'scope>(&self, new: Ptr<T>, ord: Ordering, _: &'scope Scope) -> Ptr<'scope, T>
-where {
+    pub fn swap<'scope>(&self, new: Ptr<T>, ord: Ordering, _: &'scope Scope) -> Ptr<'scope, T> {
         Ptr::from_data(self.data.swap(new.data, ord))
     }
 
@@ -517,8 +515,7 @@ where {
     ///     assert_eq!(a.load(SeqCst, scope).tag(), 2);
     /// });
     /// ```
-    pub fn fetch_and<'scope>(&self, val: usize, ord: Ordering, _: &'scope Scope) -> Ptr<'scope, T>
-where {
+    pub fn fetch_and<'scope>(&self, val: usize, ord: Ordering, _: &'scope Scope) -> Ptr<'scope, T> {
         validate_tag::<T>(val);
         Ptr::from_data(self.data.fetch_and(val, ord))
     }
@@ -545,8 +542,7 @@ where {
     ///     assert_eq!(a.load(SeqCst, scope).tag(), 3);
     /// });
     /// ```
-    pub fn fetch_or<'scope>(&self, val: usize, ord: Ordering, _: &'scope Scope) -> Ptr<'scope, T>
-where {
+    pub fn fetch_or<'scope>(&self, val: usize, ord: Ordering, _: &'scope Scope) -> Ptr<'scope, T> {
         validate_tag::<T>(val);
         Ptr::from_data(self.data.fetch_or(val, ord))
     }
@@ -573,8 +569,7 @@ where {
     ///     assert_eq!(a.load(SeqCst, scope).tag(), 2);
     /// });
     /// ```
-    pub fn fetch_xor<'scope>(&self, val: usize, ord: Ordering, _: &'scope Scope) -> Ptr<'scope, T>
-where {
+    pub fn fetch_xor<'scope>(&self, val: usize, ord: Ordering, _: &'scope Scope) -> Ptr<'scope, T> {
         validate_tag::<T>(val);
         Ptr::from_data(self.data.fetch_xor(val, ord))
     }
@@ -697,8 +692,7 @@ impl<T> Owned<T> {
     /// ```
     ///
     /// [`Ptr`]: struct.Ptr.html
-    pub fn into_ptr<'scope>(self, _: &'scope Scope) -> Ptr<'scope, T>
-where {
+    pub fn into_ptr<'scope>(self, _: &'scope Scope) -> Ptr<'scope, T> {
         let data = self.data;
         mem::forget(self);
         Ptr::from_data(data)

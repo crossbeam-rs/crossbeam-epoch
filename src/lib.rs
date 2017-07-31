@@ -18,10 +18,8 @@
 //! pinned mutators get unpinned. Such objects can be stored into a [`Garbage`], where they are kept
 //! until the right time for their destruction comes.
 //!
-//! There is a global shared instance of garbage queue, which can only deallocate memory. It cannot
-//! drop objects or run arbitrary destruction procedures. Removed objects can be stored into it by
-//! calling [`defer_free`] or [`defer_drop`]. Also you can [`defer`] to call an arbitrary function
-//! until the mutator is unpinned.
+//! There is a global shared instance of garbage queue, which can deallocate ([`defer_free`]) or
+//! drop ([`defer_drop`]) objects, or even run arbitrary destruction procedures ([`defer`]).
 //!
 //! [`Atomic`]: struct.Atomic.html
 //! [`Ptr`]: struct.Ptr.html
@@ -34,6 +32,8 @@
 
 #[macro_use(defer)]
 extern crate scopeguard;
+#[macro_use]
+extern crate lazy_static;
 
 #[macro_use]
 pub mod util;
