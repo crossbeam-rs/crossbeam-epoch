@@ -41,7 +41,7 @@ mod atomic;
 mod mutator;
 mod epoch;
 mod global;
-pub mod sync;
+mod sync;
 
 pub use self::atomic::{Atomic, CompareAndSetOrdering, Owned, Ptr};
 pub use self::global::{pin, is_pinned};
