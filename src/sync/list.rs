@@ -5,7 +5,7 @@ use util::cache_padded::CachePadded;
 
 
 /// An entry in the linked list.
-struct Node_<T> {
+struct NodeInner<T> {
     /// The data in the entry.
     data: T,
 
@@ -14,7 +14,7 @@ struct Node_<T> {
     next: Atomic<Node<T>>,
 }
 
-pub struct Node<T>(CachePadded<Node_<T>>);
+pub struct Node<T>(CachePadded<NodeInner<T>>);
 
 pub struct List<T> {
     head: Atomic<Node<T>>,
@@ -40,7 +40,7 @@ pub enum IterResult<'scope, T: 'scope> {
 impl<T> Node<T> {
     /// Returns the data in this entry.
     fn new(data: T) -> Self {
-        Node(CachePadded::new(Node_ {
+        Node(CachePadded::new(NodeInner {
             data: data,
             next: Atomic::null(),
         }))
