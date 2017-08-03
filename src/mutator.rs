@@ -8,7 +8,7 @@
 //!
 //! # Pinning
 //!
-//! Every registry contains an integer that tells whether the mutator is pinned and if so, what was
+//! Every mutator contains an integer that tells whether the mutator is pinned and if so, what was
 //! the global epoch at the time it was pinned. Mutators also hold a pin counter that aids in
 //! periodic global epoch advancement.
 //!
@@ -30,8 +30,8 @@ const PINS_BETWEEN_COLLECT: usize = 128;
 
 /// Entity that changes shared locations.
 pub struct Mutator<'scope> {
-    /// This mutator's entry in the registry list.
-    registry: &'scope Node<Registry>,
+    /// This mutator's entry in the local epoch list.
+    local_epoch: &'scope Node<LocalEpoch>,
     /// Whether the mutator is currently pinned.
     is_pinned: Cell<bool>,
     /// Total number of pinnings performed.
@@ -40,7 +40,7 @@ pub struct Mutator<'scope> {
 
 /// An entry in the linked list of the registered mutators.
 #[derive(Default, Debug)]
-pub struct Registry {
+pub struct LocalEpoch {
     /// The least significant bit is set if the mutator is currently pinned. The rest of the bits
     /// encode the current epoch.
     state: AtomicUsize,
@@ -67,14 +67,14 @@ pub struct Scope {
 impl<'scope> Mutator<'scope> {
     pub fn new() -> Self {
         Mutator {
-            registry: unsafe {
+            local_epoch: unsafe {
                 // Since we dereference no pointers in this block, it is safe to use `unprotected`.
                 //
                 // FIXME(jeehoonkang): in fact, since we create no garbages, it is safe to use
                 // `unprotected_with_bag` with an invalid bag.
                 unprotected(|scope| {
                     &*global::REGISTRIES
-                        .insert_head(Registry::new(), scope)
+                        .insert_head(LocalEpoch::new(), scope)
                         .as_raw()
                 })
             },
@@ -105,7 +105,7 @@ impl<'scope> Mutator<'scope> {
     where
         F: FnOnce(&Scope) -> R,
     {
-        let registry = self.registry.get();
+        let local_epoch = self.local_epoch.get();
         let scope = &Scope { _private: ::std::ptr::null_mut() };
 
         let was_pinned = self.is_pinned.get();
@@ -116,7 +116,7 @@ impl<'scope> Mutator<'scope> {
 
             // Pin the mutator.
             self.is_pinned.set(true);
-            registry.set_pinned();
+            local_epoch.set_pinned();
 
             // If the counter progressed enough, try advancing the epoch and collecting garbage.
             if count % PINS_BETWEEN_COLLECT == 0 {
@@ -128,7 +128,7 @@ impl<'scope> Mutator<'scope> {
         defer! {
             if !was_pinned {
                 // Unpin the mutator.
-                registry.set_unpinned();
+                local_epoch.set_unpinned();
                 self.is_pinned.set(false);
             }
         }
@@ -152,7 +152,7 @@ impl<'scope> Drop for Mutator<'scope> {
             global::collect(scope);
 
             // Unregister the mutator by marking this entry as deleted.
-            self.registry.delete(scope);
+            self.local_epoch.delete(scope);
 
             // Push the local bag into the global garbage queue.
             unimplemented!();
@@ -160,7 +160,7 @@ impl<'scope> Drop for Mutator<'scope> {
     }
 }
 
-impl Registry {
+impl LocalEpoch {
     // FIXME(stjepang): Registries are stored in a linked list because linked lists are fairly easy
     // to implement in a lock-free manner. However, traversal is rather slow due to cache misses and
     // data dependencies. We should experiment with other data structures as well.
@@ -196,7 +196,7 @@ impl Registry {
             // Both instructions have the effect of a full barrier, but the second one seems to be
             // faster in this particular case.
             let result = self.state.compare_and_swap(0, state, SeqCst);
-            debug_assert_eq!(0, result, "Registry::set_pinned()'s CAS should succeed.");
+            debug_assert_eq!(0, result, "LocalEpoch::set_pinned()'s CAS should succeed.");
         } else {
             self.state.store(state, Relaxed);
             ::std::sync::atomic::fence(SeqCst);

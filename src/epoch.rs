@@ -11,7 +11,7 @@ use std::ops::Deref;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Relaxed, Acquire, Release, SeqCst};
 
-use mutator::Registry;
+use mutator::LocalEpoch;
 use mutator::Scope;
 use sync::list::{List, IterResult};
 use util::cache_padded::CachePadded;
@@ -34,7 +34,7 @@ impl Epoch {
     ///
     /// Returns the current global epoch.
     #[cold]
-    pub fn try_advance<'scope>(&self, registries: &List<Registry>, scope: &Scope) -> usize {
+    pub fn try_advance<'scope>(&self, registries: &List<LocalEpoch>, scope: &Scope) -> usize {
         let epoch = self.epoch.load(Relaxed);
         ::std::sync::atomic::fence(SeqCst);
 
@@ -48,8 +48,8 @@ impl Epoch {
                     return epoch;
                 }
                 IterResult::None => break,
-                IterResult::Some(registry) => {
-                    let (mutator_is_pinned, mutator_epoch) = registry.get_state();
+                IterResult::Some(local_epoch) => {
+                    let (mutator_is_pinned, mutator_epoch) = local_epoch.get_state();
 
                     // If the mutator was pinned in a different epoch, we cannot advance the global
                     // epoch just yet.

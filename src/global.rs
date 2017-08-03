@@ -6,14 +6,14 @@
 //!
 //! `registries` is the list is the registered mutators, and `epoch` is the global epoch.
 
-use mutator::{Mutator, Registry, Scope};
+use mutator::{Mutator, LocalEpoch, Scope};
 use epoch::Epoch;
 use sync::list::List;
 
 
 lazy_static! {
     /// REGISTRIES is the head pointer of the list of mutator registries.
-    pub static ref REGISTRIES: List<Registry> = List::new();
+    pub static ref REGISTRIES: List<LocalEpoch> = List::new();
     /// EPOCH is a reference to the global epoch.
     pub static ref EPOCH: Epoch = Epoch::new();
 }
