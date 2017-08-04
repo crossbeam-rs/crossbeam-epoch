@@ -11,6 +11,7 @@ use epoch::Epoch;
 use sync::list::List;
 
 
+// FIXME(jeehoonkang): accessing globals in `lazy_static!` is blocking.
 lazy_static! {
     /// REGISTRIES is the head pointer of the list of mutator registries.
     pub static ref REGISTRIES: List<LocalEpoch> = List::new();
