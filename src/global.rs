@@ -12,6 +12,10 @@ use sync::list::List;
 
 
 // FIXME(jeehoonkang): accessing globals in `lazy_static!` is blocking.
+//
+// Since static globals defined in `lazy_static!` are never dropped
+// (https://github.com/rust-lang/rfcs/blob/master/text/1440-drop-types-in-const.md), it is safe to
+// use `unprotected()` in `List`'s destructor.
 lazy_static! {
     /// REGISTRIES is the head pointer of the list of mutator registries.
     pub static ref REGISTRIES: List<LocalEpoch> = List::new();
