@@ -1,3 +1,8 @@
+//! Michael's lock-free linked list.
+//!
+//! Michael.  High Performance Dynamic Lock-Free Hash Tables and List-Based Sets.  SPAA 2002.
+//! http://dl.acm.org/citation.cfm?id=564870.564881
+
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 
 use {Atomic, Owned, Ptr, Scope, unprotected};

@@ -1,3 +1,4 @@
 //! Synchronization primitives.
 
-pub mod list;
+pub mod michael_list;
+pub mod ms_queue;
