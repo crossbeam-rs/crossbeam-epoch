@@ -496,7 +496,8 @@ impl<T> Atomic<T> {
     /// Bitwise "and" with the current tag.
     ///
     /// Performs a bitwise "and" operation on the current tag and the argument `val`, and sets the
-    /// new tag to the result. Returns the previous pointer.
+    /// new tag to the result. Returns the previous pointer.  Before the operation, `val` is
+    /// truncated to be fit in the bitmask returned by [`tag_bits()`](fn.tag_bits.html)).
     ///
     /// This method takes an [`Ordering`] argument which describes the memory ordering of this
     /// operation.
@@ -522,7 +523,8 @@ impl<T> Atomic<T> {
     /// Bitwise "or" with the current tag.
     ///
     /// Performs a bitwise "or" operation on the current tag and the argument `val`, and sets the
-    /// new tag to the result. Returns the previous pointer.
+    /// new tag to the result. Returns the previous pointer.  Before the operation, `val` is
+    /// truncated to be fit in the bitmask returned by [`tag_bits()`](fn.tag_bits.html)).
     ///
     /// This method takes an [`Ordering`] argument which describes the memory ordering of this
     /// operation.
@@ -548,7 +550,8 @@ impl<T> Atomic<T> {
     /// Bitwise "xor" with the current tag.
     ///
     /// Performs a bitwise "xor" operation on the current tag and the argument `val`, and sets the
-    /// new tag to the result. Returns the previous pointer.
+    /// new tag to the result. Returns the previous pointer.  Before the operation, `val` is
+    /// truncated to be fit in the bitmask returned by [`tag_bits()`](fn.tag_bits.html)).
     ///
     /// This method takes an [`Ordering`] argument which describes the memory ordering of this
     /// operation.
