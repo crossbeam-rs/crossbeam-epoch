@@ -1,11 +1,11 @@
-/// The global epoch
-///
-/// The last bit in this number is unused and is always zero. Every so often the global epoch is
-/// incremented, i.e. we say it "advances". A pinned mutator may advance the global epoch only if
-/// all currently pinned mutators have been pinned in the current epoch.
-///
-/// If an object became garbage in some epoch, then we can be sure that after two advancements no
-/// mutator will hold a reference to it. That is the crux of safe memory reclamation.
+//! The global epoch
+//!
+//! The last bit in this number is unused and is always zero. Every so often the global epoch is
+//! incremented, i.e. we say it "advances". A pinned mutator may advance the global epoch only if
+//! all currently pinned mutators have been pinned in the current epoch.
+//!
+//! If an object became garbage in some epoch, then we can be sure that after two advancements no
+//! mutator will hold a reference to it. That is the crux of safe memory reclamation.
 
 use std::ops::Deref;
 use std::sync::atomic::AtomicUsize;
