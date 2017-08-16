@@ -68,13 +68,13 @@ impl CompareAndSetOrdering for (Ordering, Ordering) {
 /// Panics if the pointer is not properly unaligned.
 #[inline]
 fn ensure_aligned<T>(raw: *const T) {
-    assert_eq!(raw as usize & low_bits::<T>(), 0, "unaligned pointer");
+    assert_eq!(raw as usize & tag_bits::<T>(), 0, "unaligned pointer");
 }
 
 /// Panics if the tag doesn't fit into the unused bits of an aligned pointer to `T`.
 #[inline]
 fn validate_tag<T>(tag: usize) {
-    let mask = low_bits::<T>();
+    let mask = tag_bits::<T>();
     assert!(
         tag <= mask,
         "tag too large to fit into the unused bits: {} > {}",
@@ -85,7 +85,7 @@ fn validate_tag<T>(tag: usize) {
 
 /// Returns a bitmask containing the unused least significant bits of an aligned pointer to `T`.
 #[inline]
-fn low_bits<T>() -> usize {
+pub fn tag_bits<T>() -> usize {
     (1 << mem::align_of::<T>().trailing_zeros()) - 1
 }
 
@@ -94,7 +94,7 @@ fn low_bits<T>() -> usize {
 #[inline]
 fn data_with_tag<T>(data: usize, tag: usize) -> usize {
     validate_tag::<T>(tag);
-    (data & !low_bits::<T>()) | tag
+    (data & !tag_bits::<T>()) | tag
 }
 
 /// An atomic pointer that can be safely shared between threads.
@@ -516,8 +516,7 @@ impl<T> Atomic<T> {
     /// });
     /// ```
     pub fn fetch_and<'scope>(&self, val: usize, ord: Ordering, _: &'scope Scope) -> Ptr<'scope, T> {
-        validate_tag::<T>(val);
-        Ptr::from_data(self.data.fetch_and(val, ord))
+        Ptr::from_data(self.data.fetch_and(val | !tag_bits::<T>(), ord))
     }
 
     /// Bitwise "or" with the current tag.
@@ -543,8 +542,7 @@ impl<T> Atomic<T> {
     /// });
     /// ```
     pub fn fetch_or<'scope>(&self, val: usize, ord: Ordering, _: &'scope Scope) -> Ptr<'scope, T> {
-        validate_tag::<T>(val);
-        Ptr::from_data(self.data.fetch_or(val, ord))
+        Ptr::from_data(self.data.fetch_or(val & tag_bits::<T>(), ord))
     }
 
     /// Bitwise "xor" with the current tag.
@@ -570,8 +568,7 @@ impl<T> Atomic<T> {
     /// });
     /// ```
     pub fn fetch_xor<'scope>(&self, val: usize, ord: Ordering, _: &'scope Scope) -> Ptr<'scope, T> {
-        validate_tag::<T>(val);
-        Ptr::from_data(self.data.fetch_xor(val, ord))
+        Ptr::from_data(self.data.fetch_xor(val & tag_bits::<T>(), ord))
     }
 }
 
@@ -708,7 +705,7 @@ impl<T> Owned<T> {
     /// assert_eq!(Owned::new(1234).tag(), 0);
     /// ```
     pub fn tag(&self) -> usize {
-        self.data & low_bits::<T>()
+        self.data & tag_bits::<T>()
     }
 
     /// Returns the same pointer, but tagged with `tag`.
@@ -734,13 +731,13 @@ impl<T> Deref for Owned<T> {
     type Target = T;
 
     fn deref(&self) -> &T {
-        unsafe { &*((self.data & !low_bits::<T>()) as *const T) }
+        unsafe { &*((self.data & !tag_bits::<T>()) as *const T) }
     }
 }
 
 impl<T> DerefMut for Owned<T> {
     fn deref_mut(&mut self) -> &mut T {
-        unsafe { &mut *((self.data & !low_bits::<T>()) as *mut T) }
+        unsafe { &mut *((self.data & !tag_bits::<T>()) as *mut T) }
     }
 }
 
@@ -888,7 +885,7 @@ impl<'scope, T> Ptr<'scope, T> {
     /// });
     /// ```
     pub fn as_raw(&self) -> *const T {
-        (self.data & !low_bits::<T>()) as *const T
+        (self.data & !tag_bits::<T>()) as *const T
     }
 
     /// Dereferences the pointer.
@@ -978,7 +975,7 @@ impl<'scope, T> Ptr<'scope, T> {
     /// });
     /// ```
     pub fn tag(&self) -> usize {
-        self.data & low_bits::<T>()
+        self.data & tag_bits::<T>()
     }
 
     /// Returns the same pointer, but tagged with `tag`.
