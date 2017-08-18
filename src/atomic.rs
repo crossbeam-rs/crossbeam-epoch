@@ -68,13 +68,13 @@ impl CompareAndSetOrdering for (Ordering, Ordering) {
 /// Panics if the pointer is not properly unaligned.
 #[inline]
 fn ensure_aligned<T>(raw: *const T) {
-    assert_eq!(raw as usize & tag_bits::<T>(), 0, "unaligned pointer");
+    assert_eq!(raw as usize & low_bits::<T>(), 0, "unaligned pointer");
 }
 
 /// Panics if the tag doesn't fit into the unused bits of an aligned pointer to `T`.
 #[inline]
 fn validate_tag<T>(tag: usize) {
-    let mask = tag_bits::<T>();
+    let mask = low_bits::<T>();
     assert!(
         tag <= mask,
         "tag too large to fit into the unused bits: {} > {}",
@@ -85,22 +85,22 @@ fn validate_tag<T>(tag: usize) {
 
 /// Returns a bitmask containing the unused least significant bits of an aligned pointer to `T`.
 #[inline]
-pub fn tag_bits<T>() -> usize {
+fn low_bits<T>() -> usize {
     (1 << mem::align_of::<T>().trailing_zeros()) - 1
 }
 
-/// Given a tagged pointer `data`, returns the same pointer, but tagged with `tag`.
-/// Panics if the tag doesn't fit into the unused bits of the pointer.
+/// Given a tagged pointer `data`, returns the same pointer, but tagged with `tag`.  `tag` is
+/// truncated to be fit into the unused bits of the pointer to `T`.
 #[inline]
 fn data_with_tag<T>(data: usize, tag: usize) -> usize {
-    validate_tag::<T>(tag);
-    (data & !tag_bits::<T>()) | tag
+    (data & !low_bits::<T>()) | (tag & low_bits::<T>())
 }
 
 /// An atomic pointer that can be safely shared between threads.
 ///
 /// The pointer must be properly aligned. Since it is aligned, a tag can be stored into the unused
-/// least significant bits of the address.
+/// least significant bits of the address.  More precisely, a tag should be less than `(1 <<
+/// mem::align_of::<T>().trailing_zeros())`.
 ///
 /// Any method that loads the pointer must be passed a reference to a [`Scope`].
 ///
@@ -496,8 +496,7 @@ impl<T> Atomic<T> {
     /// Bitwise "and" with the current tag.
     ///
     /// Performs a bitwise "and" operation on the current tag and the argument `val`, and sets the
-    /// new tag to the result. Returns the previous pointer.  Before the operation, `val` is
-    /// truncated to be fit in the bitmask returned by [`tag_bits()`](fn.tag_bits.html)).
+    /// new tag to the result. Returns the previous pointer.
     ///
     /// This method takes an [`Ordering`] argument which describes the memory ordering of this
     /// operation.
@@ -517,14 +516,13 @@ impl<T> Atomic<T> {
     /// });
     /// ```
     pub fn fetch_and<'scope>(&self, val: usize, ord: Ordering, _: &'scope Scope) -> Ptr<'scope, T> {
-        Ptr::from_data(self.data.fetch_and(val | !tag_bits::<T>(), ord))
+        Ptr::from_data(self.data.fetch_and(val | !low_bits::<T>(), ord))
     }
 
     /// Bitwise "or" with the current tag.
     ///
     /// Performs a bitwise "or" operation on the current tag and the argument `val`, and sets the
-    /// new tag to the result. Returns the previous pointer.  Before the operation, `val` is
-    /// truncated to be fit in the bitmask returned by [`tag_bits()`](fn.tag_bits.html)).
+    /// new tag to the result. Returns the previous pointer.
     ///
     /// This method takes an [`Ordering`] argument which describes the memory ordering of this
     /// operation.
@@ -544,14 +542,13 @@ impl<T> Atomic<T> {
     /// });
     /// ```
     pub fn fetch_or<'scope>(&self, val: usize, ord: Ordering, _: &'scope Scope) -> Ptr<'scope, T> {
-        Ptr::from_data(self.data.fetch_or(val & tag_bits::<T>(), ord))
+        Ptr::from_data(self.data.fetch_or(val & low_bits::<T>(), ord))
     }
 
     /// Bitwise "xor" with the current tag.
     ///
     /// Performs a bitwise "xor" operation on the current tag and the argument `val`, and sets the
-    /// new tag to the result. Returns the previous pointer.  Before the operation, `val` is
-    /// truncated to be fit in the bitmask returned by [`tag_bits()`](fn.tag_bits.html)).
+    /// new tag to the result. Returns the previous pointer.
     ///
     /// This method takes an [`Ordering`] argument which describes the memory ordering of this
     /// operation.
@@ -571,7 +568,7 @@ impl<T> Atomic<T> {
     /// });
     /// ```
     pub fn fetch_xor<'scope>(&self, val: usize, ord: Ordering, _: &'scope Scope) -> Ptr<'scope, T> {
-        Ptr::from_data(self.data.fetch_xor(val & tag_bits::<T>(), ord))
+        Ptr::from_data(self.data.fetch_xor(val & low_bits::<T>(), ord))
     }
 }
 
@@ -708,7 +705,7 @@ impl<T> Owned<T> {
     /// assert_eq!(Owned::new(1234).tag(), 0);
     /// ```
     pub fn tag(&self) -> usize {
-        self.data & tag_bits::<T>()
+        self.data & low_bits::<T>()
     }
 
     /// Returns the same pointer, but tagged with `tag`.
@@ -734,13 +731,13 @@ impl<T> Deref for Owned<T> {
     type Target = T;
 
     fn deref(&self) -> &T {
-        unsafe { &*((self.data & !tag_bits::<T>()) as *const T) }
+        unsafe { &*((self.data & !low_bits::<T>()) as *const T) }
     }
 }
 
 impl<T> DerefMut for Owned<T> {
     fn deref_mut(&mut self) -> &mut T {
-        unsafe { &mut *((self.data & !tag_bits::<T>()) as *mut T) }
+        unsafe { &mut *((self.data & !low_bits::<T>()) as *mut T) }
     }
 }
 
@@ -888,7 +885,7 @@ impl<'scope, T> Ptr<'scope, T> {
     /// });
     /// ```
     pub fn as_raw(&self) -> *const T {
-        (self.data & !tag_bits::<T>()) as *const T
+        (self.data & !low_bits::<T>()) as *const T
     }
 
     /// Dereferences the pointer.
@@ -978,7 +975,7 @@ impl<'scope, T> Ptr<'scope, T> {
     /// });
     /// ```
     pub fn tag(&self) -> usize {
-        self.data & tag_bits::<T>()
+        self.data & low_bits::<T>()
     }
 
     /// Returns the same pointer, but tagged with `tag`.
@@ -1020,19 +1017,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn invalid_tag_i8() {
-        Ptr::<i8>::null().with_tag(1);
-    }
-
-    #[test]
     fn valid_tag_i64() {
         Ptr::<i64>::null().with_tag(7);
-    }
-
-    #[test]
-    #[should_panic]
-    fn invalid_tag_i64() {
-        Ptr::<i64>::null().with_tag(8);
     }
 }
