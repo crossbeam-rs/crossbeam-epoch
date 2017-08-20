@@ -241,9 +241,6 @@ impl Scope {
 
     /// Deferred deallocation of heap-allocated object `ptr`.
     ///
-    /// The specified object is an array allocated at address `object` and consists of `count`
-    /// elements of type `T`.
-    ///
     /// This function inserts the object into a mutator-local [`Bag`]. When the bag becomes full,
     /// the bag is flushed into the globally shared queue of bags.
     ///
@@ -257,9 +254,6 @@ impl Scope {
     }
 
     /// Deferred destruction and deallocation of heap-allocated object `ptr`.
-    ///
-    /// The specified object is an array allocated at address `object` and consists of `count`
-    /// elements of type `T`.
     pub unsafe fn defer_drop<T: Send + 'static>(&self, ptr: Ptr<T>) {
         self.defer_garbage(Garbage::new_drop(ptr.as_raw() as *mut T, 1))
     }

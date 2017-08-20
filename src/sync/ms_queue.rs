@@ -151,6 +151,10 @@ impl<T> Queue<T> {
         }
     }
 
+    /// Attempt to dequeue from the front, if the item satisfies the given condition.
+    ///
+    /// Returns `None` if the queue is observed to be empty, or the head does not satisfy the given
+    /// condition.
     pub fn try_pop_if<F>(&self, condition: F, scope: &Scope) -> Option<T>
     where
         F: Fn(&T) -> bool,

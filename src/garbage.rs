@@ -3,7 +3,7 @@
 //! # Garbages
 //!
 //! Objects that get unlinked from concurrent data structures must be stashed away until the global
-//! epoch sufficiently advances so that they become safe for destruction.  We call these object
+//! epoch sufficiently advances so that they become safe for destruction.  We call these objects
 //! garbages.  When the global epoch advances sufficiently, `Destroy` garbages are dropped (i.e. the
 //! destructors are called), and `Free` garbages are freed.  In addition, you can register arbitrary
 //! function to be called later using the `Fn` garbages.
@@ -20,7 +20,7 @@
 //! Whenever a bag is pushed into a queue, some garbage in the queue is collected and destroyed
 //! along the way.  Garbage collection can also be manually triggered by calling `collect()`.  This
 //! design reduces contention on data structures.  Ideally each instance of concurrent data
-//! structure may have it's own queue that gets fully destroyed as soon as the data structure gets
+//! structure may have its own queue that gets fully destroyed as soon as the data structure gets
 //! dropped.
 
 use std::mem;
@@ -52,11 +52,13 @@ impl Garbage {
     /// The specified object is an array allocated at address `object` and consists of `size`
     /// elements of type `T`.
     ///
-    /// Note: The object must be `Send + 'self`.
+    /// Note: The object must be `Send + 'static`.
     pub fn new_destroy<T>(object: *mut T, size: usize, destroy: unsafe fn(*mut T, usize)) -> Self {
         Garbage::Destroy {
             object: object as *mut u8,
             size: size,
+            // FIXME(jeehoonkang): here we unsafely assume that `fn(*mut T, usize)` and `fn(*mut u8,
+            // usize)` have the same size.
             destroy: unsafe { mem::transmute(destroy) },
         }
     }
@@ -74,10 +76,10 @@ impl Garbage {
 
     /// Make a garbage object that will later be dropped and freed.
     ///
-    /// The specified object is an array allocated at address `object` and consists of `count`
+    /// The specified object is an array allocated at address `object` and consists of `size`
     /// elements of type `T`.
     ///
-    /// Note: The object must be `Send + 'self`.
+    /// Note: The object must be `Send + 'static`.
     pub fn new_drop<T>(object: *mut T, size: usize) -> Self {
         unsafe fn destruct<T>(object: *mut T, size: usize) {
             // Run the destructors and free the memory.

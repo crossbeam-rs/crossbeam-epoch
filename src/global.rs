@@ -34,6 +34,7 @@ lazy_static! {
 }
 
 
+/// Pushes the bag onto the global queue and replaces the bag with a new empty bag.
 #[inline]
 pub fn push_bag<'scope>(bag: &mut Bag, scope: &'scope Scope) {
     let epoch = EPOCH.load(Relaxed);
