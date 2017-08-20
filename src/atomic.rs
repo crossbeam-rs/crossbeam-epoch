@@ -71,18 +71,6 @@ fn ensure_aligned<T>(raw: *const T) {
     assert_eq!(raw as usize & low_bits::<T>(), 0, "unaligned pointer");
 }
 
-/// Panics if the tag doesn't fit into the unused bits of an aligned pointer to `T`.
-#[inline]
-fn validate_tag<T>(tag: usize) {
-    let mask = low_bits::<T>();
-    assert!(
-        tag <= mask,
-        "tag too large to fit into the unused bits: {} > {}",
-        tag,
-        mask
-    );
-}
-
 /// Returns a bitmask containing the unused least significant bits of an aligned pointer to `T`.
 #[inline]
 fn low_bits<T>() -> usize {
@@ -708,7 +696,8 @@ impl<T> Owned<T> {
         self.data & low_bits::<T>()
     }
 
-    /// Returns the same pointer, but tagged with `tag`.
+    /// Returns the same pointer, but tagged with `tag`. `tag` is truncated to be fit into the
+    /// unused bits of the pointer to `T`.
     ///
     /// # Examples
     ///
@@ -978,7 +967,8 @@ impl<'scope, T> Ptr<'scope, T> {
         self.data & low_bits::<T>()
     }
 
-    /// Returns the same pointer, but tagged with `tag`.
+    /// Returns the same pointer, but tagged with `tag`. `tag` is truncated to be fit into the
+    /// unused bits of the pointer to `T`.
     ///
     /// # Examples
     ///
