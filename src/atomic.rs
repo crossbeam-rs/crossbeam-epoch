@@ -638,7 +638,7 @@ impl<T> Owned<T> {
     /// let o = unsafe { Owned::from_raw(Box::into_raw(Box::new(1234))) };
     /// ```
     pub fn from_box(b: Box<T>) -> Self {
-        Self::from_raw(Box::into_raw(b))
+        unsafe { Self::from_raw(Box::into_raw(b)) }
     }
 
     /// Returns a new owned pointer pointing to `raw`.
@@ -658,7 +658,7 @@ impl<T> Owned<T> {
     ///
     /// let o = unsafe { Owned::from_raw(Box::into_raw(Box::new(1234))) };
     /// ```
-    pub fn from_raw(raw: *mut T) -> Self {
+    pub unsafe fn from_raw(raw: *mut T) -> Self {
         ensure_aligned(raw);
         Self::from_data(raw as usize)
     }
