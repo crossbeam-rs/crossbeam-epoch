@@ -604,7 +604,7 @@ pub struct Owned<T> {
 
 impl<T> Owned<T> {
     /// Returns a new owned pointer pointing to the tagged pointer `data`.
-    fn from_data(data: usize) -> Self {
+    unsafe fn from_data(data: usize) -> Self {
         Owned {
             data: data,
             _marker: PhantomData,
@@ -712,7 +712,9 @@ impl<T> Owned<T> {
     pub fn with_tag(self, tag: usize) -> Self {
         let data = self.data;
         mem::forget(self);
-        Self::from_data(data_with_tag::<T>(data, tag))
+        unsafe {
+            Self::from_data(data_with_tag::<T>(data, tag))
+        }
     }
 }
 
