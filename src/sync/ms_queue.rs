@@ -53,81 +53,90 @@ impl<T> Queue<T> {
     }
 
     #[inline(always)]
-    /// Attempt to atomically place `n` into the `next` pointer of `onto`.
-    ///
-    /// If unsuccessful, returns ownership of `n`, possibly updating
-    /// the queue's `tail` pointer.
-    fn push_internal(
-        &self,
-        onto: Ptr<Node<T>>,
-        new: Owned<Node<T>>,
-        scope: &Scope,
-    ) -> Result<(), Owned<Node<T>>> {
+    /// Attempt to atomically place `n` into the `next` pointer of `onto`, and return if it
+    /// succeeded. the queue's `tail` pointer may be updated.
+    fn push_internal(&self, onto: Ptr<Node<T>>, new: Ptr<Node<T>>, scope: &Scope) -> bool {
         // is `onto` the actual tail?
         let o = unsafe { onto.deref() };
         let next = o.next.load(Acquire, scope);
         if unsafe { next.as_ref().is_some() } {
             // if not, try to "help" by moving the tail pointer forward
             let _ = self.tail.compare_and_set(onto, next, Release, scope);
-            Err(new)
+            false
         } else {
             // looks like the actual tail; attempt to link in `n`
-            o.next
-                .compare_and_set_owned(Ptr::null(), new, Release, scope)
-                .map(|new| {
-                    // try to move the tail pointer forward
-                    let _ = self.tail.compare_and_set(onto, new, Release, scope);
-                })
-                .map_err(|(_, new)| new)
+            let result = o.next
+                .compare_and_set(Ptr::null(), new, Release, scope)
+                .is_ok();
+            if result {
+                // try to move the tail pointer forward
+                let _ = self.tail.compare_and_set(onto, new, Release, scope);
+            }
+            result
         }
     }
 
-    /// Add `t` to the back of the queue, possibly waking up threads
-    /// blocked on `pop`.
+    /// Add `t` to the back of the queue, possibly waking up threads blocked on `pop`.
     pub fn push(&self, t: T, scope: &Scope) {
-        let mut new = Owned::new(Node {
+        let new = Owned::new(Node {
             data: t,
             next: Atomic::null(),
         });
+        let new = Owned::into_ptr(new, scope);
 
         loop {
-            // We push onto the tail, so we'll start optimistically by looking
-            // there first.
+            // We push onto the tail, so we'll start optimistically by looking there first.
             let tail = self.tail.load(Acquire, scope);
 
-            // Attempt to push onto the `tail` snapshot; fails if
-            // `tail.next` has changed, which will always be the case if the
-            // queue has transitioned to blocking mode.
-            match self.push_internal(tail, new, scope) {
-                Ok(_) => break,
-                Err(temp) => {
-                    // retry
-                    new = temp
-                }
+            // Attempt to push onto the `tail` snapshot; fails if `tail.next` has changed.
+            if self.push_internal(tail, new, scope) {
+                break;
             }
         }
     }
 
     #[inline(always)]
-    // Attempt to pop a data node. `Ok(None)` if queue is empty or in blocking
-    // mode; `Err(())` if lost race to pop.
+    // Attempt to pop a data node. `Ok(None)` if queue is empty; `Err(())` if lost race to pop.
     fn pop_internal(&self, scope: &Scope) -> Result<Option<T>, ()> {
         let head = self.head.load(Acquire, scope);
         let h = unsafe { head.deref() };
         let next = h.next.load(Acquire, scope);
         match unsafe { next.as_ref() } {
-            None => Ok(None),
             Some(n) => unsafe {
-                if self.head
+                self.head
                     .compare_and_set(head, next, Release, scope)
-                    .is_ok()
-                {
-                    scope.defer_free(head);
-                    Ok(Some(ptr::read(&n.data)))
-                } else {
-                    Err(())
-                }
+                    .map(|_| {
+                        scope.defer_free(head);
+                        Some(ptr::read(&n.data))
+                    })
+                    .map_err(|_| ())
             },
+            None => Ok(None),
+        }
+    }
+
+    #[inline(always)]
+    // Attempt to pop a data node, if the data satisfies the given condition. `Ok(None)` if queue is
+    // empty or the data does not satisfy the condition; `Err(())` if lost race to pop.
+    fn pop_if_internal<F>(&self, condition: F, scope: &Scope) -> Result<Option<T>, ()>
+    where
+        T: Sync,
+        F: Fn(&T) -> bool,
+    {
+        let head = self.head.load(Acquire, scope);
+        let h = unsafe { head.deref() };
+        let next = h.next.load(Acquire, scope);
+        match unsafe { next.as_ref() } {
+            Some(n) if condition(&n.data) => unsafe {
+                self.head
+                    .compare_and_set(head, next, Release, scope)
+                    .map(|_| {
+                        scope.defer_free(head);
+                        Some(ptr::read(&n.data))
+                    })
+                    .map_err(|_| ())
+            },
+            None | Some(_) => Ok(None),
         }
     }
 
@@ -145,8 +154,8 @@ impl<T> Queue<T> {
     /// Returns `None` if the queue is observed to be empty.
     pub fn try_pop(&self, scope: &Scope) -> Option<T> {
         loop {
-            if let Ok(r) = self.pop_internal(scope) {
-                return r;
+            if let Ok(head) = self.pop_internal(scope) {
+                return head;
             }
         }
     }
@@ -157,21 +166,12 @@ impl<T> Queue<T> {
     /// condition.
     pub fn try_pop_if<F>(&self, condition: F, scope: &Scope) -> Option<T>
     where
+        T: Sync,
         F: Fn(&T) -> bool,
     {
         loop {
-            if let Ok(head) = self.pop_internal(scope) {
-                match head {
-                    None => return None,
-                    Some(h) => {
-                        if condition(&h) {
-                            return Some(h);
-                        } else {
-                            mem::forget(h);
-                            return None;
-                        }
-                    }
-                }
+            if let Ok(head) = self.pop_if_internal(&condition, scope) {
+                return head;
             }
         }
     }

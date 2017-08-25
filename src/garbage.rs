@@ -44,6 +44,7 @@ pub enum Garbage {
     Fn { f: Option<SendBoxFnOnce<(), ()>> },
 }
 
+unsafe impl Sync for Garbage {}
 unsafe impl Send for Garbage {}
 
 impl Garbage {
