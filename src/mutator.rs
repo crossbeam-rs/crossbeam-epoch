@@ -254,7 +254,7 @@ impl Scope {
     }
 
     /// Deferred destruction and deallocation of heap-allocated object `ptr`.
-    pub unsafe fn defer_drop<T: Send + 'static>(&self, ptr: Ptr<T>) {
+    pub unsafe fn defer_drop<'s, T: Send + 's>(&'s self, ptr: Ptr<'s, T>) {
         self.defer_garbage(Garbage::new_drop(ptr.as_raw() as *mut T, 1))
     }
 
