@@ -254,6 +254,7 @@ impl Scope {
     }
 
     /// Deferred destruction and deallocation of heap-allocated object `ptr`.
+    // FIXME(jeehoonkang): `T: 'static` may be too restrictive.
     pub unsafe fn defer_drop<T: Send + 'static>(&self, ptr: Ptr<T>) {
         self.defer_garbage(Garbage::new_drop(ptr.as_raw() as *mut T, 1))
     }

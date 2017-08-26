@@ -105,7 +105,6 @@ where
 {
     let mut bag = Bag::new();
     let result = unprotected_with_bag(&mut bag, f);
-    drop(bag);
     result
 }
 
