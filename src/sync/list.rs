@@ -6,7 +6,7 @@
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 
 use {Atomic, Owned, Ptr, Scope, unprotected};
-use util::cache_padded::CachePadded;
+use crossbeam_utils::cache_padded::CachePadded;
 
 
 /// An entry in the linked list.

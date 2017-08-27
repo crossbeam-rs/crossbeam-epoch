@@ -9,7 +9,7 @@ use std::{mem, ptr};
 use std::sync::atomic::Ordering::{Relaxed, Acquire, Release};
 
 use {Atomic, Owned, Ptr, Scope, pin, unprotected};
-use util::cache_padded::CachePadded;
+use crossbeam_utils::cache_padded::CachePadded;
 
 // The representation here is a singly-linked list, with a sentinel node at the front. In general
 // the `tail` pointer may lag behind the actual tail. Non-sentinel nodes are either all `Data` or
@@ -195,7 +195,7 @@ impl<T> Drop for Queue<T> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use util::scoped;
+    use crossbeam_utils::scoped;
 
     struct Queue<T> {
         queue: super::Queue<T>,

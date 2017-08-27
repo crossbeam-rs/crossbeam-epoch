@@ -14,7 +14,7 @@ use std::sync::atomic::Ordering::{Relaxed, Acquire, Release, SeqCst};
 use mutator::LocalEpoch;
 use mutator::Scope;
 use sync::list::{List, IterResult};
-use util::cache_padded::CachePadded;
+use crossbeam_utils::cache_padded::CachePadded;
 
 /// The global epoch is a (cache-padded) integer.
 #[derive(Default, Debug)]

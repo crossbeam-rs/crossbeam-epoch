@@ -36,9 +36,8 @@ extern crate scopeguard;
 extern crate lazy_static;
 extern crate arrayvec;
 extern crate boxfnonce;
+extern crate crossbeam_utils;
 
-#[macro_use]
-pub mod util;
 mod atomic;
 mod mutator;
 mod garbage;
