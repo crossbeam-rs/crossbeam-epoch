@@ -13,7 +13,7 @@ use std::sync::atomic::Ordering::{Relaxed, Acquire, Release, SeqCst};
 
 use mutator::LocalEpoch;
 use mutator::Scope;
-use sync::michael_list::{List, IterResult};
+use sync::list::{List, IterResult};
 use util::cache_padded::CachePadded;
 
 /// The global epoch is a (cache-padded) integer.

@@ -20,7 +20,7 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Relaxed, Release, SeqCst};
 
 use atomic::Ptr;
-use sync::michael_list::Node;
+use sync::list::Node;
 use garbage::{Garbage, Bag};
 use global;
 

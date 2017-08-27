@@ -11,8 +11,8 @@ use std::sync::atomic::Ordering::{Relaxed, SeqCst};
 use mutator::{Mutator, LocalEpoch, Scope, unprotected_with_bag};
 use garbage::Bag;
 use epoch::Epoch;
-use sync::michael_list::List;
-use sync::ms_queue::Queue;
+use sync::list::List;
+use sync::queue::Queue;
 
 
 /// Number of bags to destroy.
