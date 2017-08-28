@@ -135,9 +135,8 @@ impl Bag {
 
     /// Attempts to insert a garbage object into the bag and returns `true` if succeeded.
     pub fn try_push(&mut self, garbage: Garbage) -> Result<(), Garbage> {
-        match self.objects.push(garbage) {
-            None => Ok(()),
-            Some(g) => Err(g),
-        }
+        self.objects.try_push(garbage).map_err(|e| {
+            e.element()
+        })
     }
 }

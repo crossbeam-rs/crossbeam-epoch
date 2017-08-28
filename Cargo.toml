@@ -17,7 +17,7 @@ strict_gc = []
 scopeguard = "0.3"
 lazy_static = "0.2"
 boxfnonce = "0.0.3"
-arrayvec = "0.3.23"
+arrayvec = "0.4"
 crossbeam-utils = { git = "https://github.com/jeehoonkang/crossbeam-utils" }
 
 [dev-dependencies]
