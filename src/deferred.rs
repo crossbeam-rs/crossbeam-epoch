@@ -26,7 +26,7 @@ impl Deferred {
 
         unsafe {
             if size <= mem::size_of::<Data>() && align <= mem::align_of::<Data>() {
-                let mut data = mem::uninitialized();
+                let mut data: Data = mem::uninitialized();
                 ptr::write(&mut data as *mut Data as *mut F, f);
 
                 unsafe fn call<F: FnOnce()>(raw: *mut u8) {
@@ -37,7 +37,7 @@ impl Deferred {
                 Deferred { call: call::<F>, data }
             } else {
                 let b: Box<F> = Box::new(f);
-                let mut data = mem::uninitialized();
+                let mut data: Data = mem::uninitialized();
                 ptr::write(&mut data as *mut Data as *mut Box<F>, b);
 
                 unsafe fn call<F: FnOnce()>(raw: *mut u8) {
