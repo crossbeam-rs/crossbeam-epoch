@@ -21,15 +21,17 @@ struct NodeInner<T> {
 
 unsafe impl<T> Send for NodeInner<T> {}
 
+#[derive(Debug)]
 pub struct Node<T>(CachePadded<NodeInner<T>>);
 
+#[derive(Debug)]
 pub struct List<T> {
     head: Atomic<Node<T>>,
 }
 
 pub struct Iter<'scope, T: 'scope> {
     /// The scope in which the iterator is operating.
-    scope: &'scope Scope,
+    scope: &'scope Scope<'scope>,
 
     /// Pointer from the predecessor to the current entry.
     pred: &'scope Atomic<Node<T>>,

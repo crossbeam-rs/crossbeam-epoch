@@ -24,6 +24,7 @@
 //! dropped.
 
 use std::mem;
+use std::fmt;
 use arrayvec::ArrayVec;
 use deferred::Deferred;
 
@@ -40,6 +41,12 @@ pub struct Garbage {
 
 unsafe impl Sync for Garbage {}
 unsafe impl Send for Garbage {}
+
+impl fmt::Debug for Garbage {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        write!(f, "garbage {{ ... }}")
+    }
+}
 
 impl Garbage {
     /// Make a garbage object that will later be destroyed using `destroy`.
@@ -101,7 +108,7 @@ impl Drop for Garbage {
 
 
 /// Bag of garbages.
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Bag {
     /// Removed objects.
     objects: ArrayVec<[Garbage; MAX_OBJECTS]>,

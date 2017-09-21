@@ -1,59 +1,57 @@
-//! Mutator: an entity that changes shared locations
+//! Handle: an entity that changes shared locations
 //!
 //! # Registration
 //!
-//! In order to track all mutators in one place, we need some form of mutator registration. When a
-//! mutator is created, it is registered to a global lock-free singly-linked list of registries; and
-//! when a mutator is dropped, it is unregistered from the list.
+//! In order to track all handles in one place, we need some form of handle registration. When a
+//! handle is created, it is registered to a global lock-free singly-linked list of registries; and
+//! when a handle is dropped, it is unregistered from the list.
 //!
 //! # Pinning
 //!
-//! Every mutator contains an integer that tells whether the mutator is pinned and if so, what was
-//! the global epoch at the time it was pinned. Mutators also hold a pin counter that aids in
+//! Every handle contains an integer that tells whether the handle is pinned and if so, what was
+//! the global epoch at the time it was pinned. Handles also hold a pin counter that aids in
 //! periodic global epoch advancement.
 //!
-//! When a mutator is pinned, a `Scope` is returned as a witness that the mutator is pinned.  Scopes
+//! When a handle is pinned, a `Scope` is returned as a witness that the handle is pinned.  Scopes
 //! are necessary for performing atomic operations, and for freeing/dropping locations.
 
 use std::cell::{Cell, UnsafeCell};
 use std::ptr;
+use std::mem;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Relaxed, Release, SeqCst};
 
-use atomic::Ptr;
 use sync::list::Node;
 use garbage::{Garbage, Bag};
-use global;
-
-
-/// Number of pinnings after which a mutator will collect some global garbage.
-const PINS_BETWEEN_COLLECT: usize = 128;
+use global::Global;
 
 
 /// Entity that changes shared locations.
-pub struct Mutator<'scope> {
+pub struct Handle<'scope> {
+    /// A reference to the global data.
+    global: &'scope Global,
     /// The local garbage objects that will be later freed.
     bag: UnsafeCell<Bag>,
-    /// This mutator's entry in the local epoch list.
+    /// This handle's entry in the local epoch list.
     local_epoch: &'scope Node<LocalEpoch>,
-    /// Whether the mutator is currently pinned.
+    /// Whether the handle is currently pinned.
     is_pinned: Cell<bool>,
     /// Total number of pinnings performed.
     pin_count: Cell<usize>,
 }
 
-/// An entry in the linked list of the registered mutators.
+/// An entry in the linked list of the registered handles.
 #[derive(Default, Debug)]
 pub struct LocalEpoch {
-    /// The least significant bit is set if the mutator is currently pinned. The rest of the bits
+    /// The least significant bit is set if the handle is currently pinned. The rest of the bits
     /// encode the current epoch.
     state: AtomicUsize,
 }
 
-/// A witness that the current mutator is pinned.
+/// A witness that the current handle is pinned.
 ///
-/// A reference to `Scope` is a witness that the current mutator is pinned. Lots of methods that
-/// interact with [`Atomic`]s can safely be called only while the mutator is pinned so they often
+/// A reference to `Scope` is a witness that the current handle is pinned. Lots of methods that
+/// interact with [`Atomic`]s can safely be called only while the handle is pinned so they often
 /// require a reference to `Scope`.
 ///
 /// This data type is inherently bound to the thread that created it, therefore it does not
@@ -61,19 +59,29 @@ pub struct LocalEpoch {
 ///
 /// [`Atomic`]: struct.Atomic.html
 #[derive(Debug)]
-pub struct Scope {
+pub struct Scope<'scope> {
+    /// A reference to the global data.
+    global: &'scope Global,
+    /// The local garbage bag.
     bag: *mut Bag, // !Send + !Sync
 }
 
 
-impl<'scope> Mutator<'scope> {
-    pub fn new() -> Self {
-        Mutator {
+impl<'scope> Handle<'scope> {
+    /// Number of pinnings after which a handle will collect some global garbage.
+    const PINS_BETWEEN_COLLECT: usize = 128;
+
+    pub fn new(global: &'scope Global) -> Self {
+        Handle {
+            global: global,
             bag: UnsafeCell::new(Bag::new()),
             local_epoch: unsafe {
                 // Since we dereference no pointers in this block, it is safe to use `unprotected`.
                 unprotected(|scope| {
-                    &*global::REGISTRIES.insert(LocalEpoch::new(), scope).as_raw()
+                    &*global
+                        .registries
+                        .insert(LocalEpoch::new(), scope)
+                        .as_raw()
                 })
             },
             is_pinned: Cell::new(false),
@@ -81,17 +89,17 @@ impl<'scope> Mutator<'scope> {
         }
     }
 
-    /// Pins the current mutator, executes a function, and unpins the mutator.
+    /// Pins the current handle, executes a function, and unpins the handle.
     ///
     /// The provided function takes a reference to a `Scope`, which can be used to interact with
     /// [`Atomic`]s. The scope serves as a proof that whatever data you load from an [`Atomic`] will
-    /// not be concurrently deleted by another mutator while the scope is alive.
+    /// not be concurrently deleted by another handle while the scope is alive.
     ///
-    /// Note that keeping a mutator pinned for a long time prevents memory reclamation of any newly
+    /// Note that keeping a handle pinned for a long time prevents memory reclamation of any newly
     /// deleted objects protected by [`Atomic`]s. The provided function should be very quick -
     /// generally speaking, it shouldn't take more than 100 ms.
     ///
-    /// Pinning is reentrant. There is no harm in pinning a mutator while it's already pinned
+    /// Pinning is reentrant. There is no harm in pinning a handle while it's already pinned
     /// (repinning is essentially a noop).
     ///
     /// Pinning itself comes with a price: it begins with a `SeqCst` fence and performs a few other
@@ -104,7 +112,7 @@ impl<'scope> Mutator<'scope> {
         F: FnOnce(&Scope) -> R,
     {
         let local_epoch = self.local_epoch.get();
-        let scope = &Scope { bag: self.bag.get() };
+        let scope = &Scope { global: self.global, bag: self.bag.get() };
 
         let was_pinned = self.is_pinned.get();
         if !was_pinned {
@@ -112,20 +120,21 @@ impl<'scope> Mutator<'scope> {
             let count = self.pin_count.get();
             self.pin_count.set(count.wrapping_add(1));
 
-            // Pin the mutator.
+            // Pin the handle.
             self.is_pinned.set(true);
-            local_epoch.set_pinned();
+            let epoch = self.global.epoch.load(Relaxed);
+            local_epoch.set_pinned(epoch);
 
             // If the counter progressed enough, try advancing the epoch and collecting garbage.
-            if count % PINS_BETWEEN_COLLECT == 0 {
-                global::collect(scope);
+            if count % Self::PINS_BETWEEN_COLLECT == 0 {
+                self.global.collect(scope);
             }
         }
 
-        // This will unpin the mutator even if `f` panics.
+        // This will unpin the handle even if `f` panics.
         defer! {
             if !was_pinned {
-                // Unpin the mutator.
+                // Unpin the handle.
                 local_epoch.set_unpinned();
                 self.is_pinned.set(false);
             }
@@ -134,33 +143,33 @@ impl<'scope> Mutator<'scope> {
         f(scope)
     }
 
-    /// Returns `true` if the current mutator is pinned.
+    /// Returns `true` if the current handle is pinned.
     pub fn is_pinned(&'scope self) -> bool {
         self.is_pinned.get()
     }
 }
 
-impl<'scope> Drop for Mutator<'scope> {
+impl<'scope> Drop for Handle<'scope> {
     fn drop(&mut self) {
-        // Now that the mutator is exiting, we must move the local bag into the global garbage
+        // Now that the handle is exiting, we must move the local bag into the global garbage
         // queue. Also, let's try advancing the epoch and help free some garbage.
 
         self.pin(|scope| {
             // Spare some cycles on garbage collection.
-            global::collect(scope);
+            self.global.collect(scope);
 
-            // Unregister the mutator by marking this entry as deleted.
+            // Unregister the handle by marking this entry as deleted.
             self.local_epoch.delete(scope);
 
             // Push the local bag into the global garbage queue.
             unsafe {
-                global::push_bag(&mut *self.bag.get(), scope);
+                self.global.push_bag(&mut *self.bag.get(), scope);
             }
         });
     }
 }
 
-/// Returns a [`Scope`] without pinning any mutator.
+/// Returns a [`Scope`] without pinning any handle.
 ///
 /// Sometimes, we'd like to have longer-lived scopes in which we know our thread can access atomics
 /// without protection. This is true e.g. when deallocating a big data structure, or when
@@ -168,8 +177,8 @@ impl<'scope> Drop for Mutator<'scope> {
 /// there is no fear of other threads concurrently destroying objects.
 ///
 /// Function `unprotected` is *unsafe* because we must promise that (1) the locations that we access
-/// should not be deallocated by concurrent mutators, and (2) the locations that we deallocate
-/// should not be accessed by concurrent mutators.
+/// should not be deallocated by concurrent handles, and (2) the locations that we deallocate
+/// should not be accessed by concurrent handles.
 ///
 /// Just like with the safe epoch::pin function, unprotected use of atomics is enclosed within a
 /// scope so that pointers created within it don't leak out or get mixed with pointers from other
@@ -179,7 +188,7 @@ pub unsafe fn unprotected<F, R>(f: F) -> R
 where
     F: FnOnce(&Scope) -> R,
 {
-    let scope = &Scope { bag: ptr::null_mut() };
+    let scope = &Scope { global: mem::uninitialized(), bag: ptr::null_mut() };
     f(scope)
 }
 
@@ -193,24 +202,23 @@ impl LocalEpoch {
         Self::default()
     }
 
-    /// Returns if the mutator is pinned, and if so, the epoch at which it is pinned.
+    /// Returns if the handle is pinned, and if so, the epoch at which it is pinned.
     #[inline]
     pub fn get_state(&self) -> (bool, usize) {
         let state = self.state.load(Relaxed);
         ((state & 1) == 1, state & !1)
     }
 
-    /// Marks the mutator as pinned.
+    /// Marks the handle as pinned.
     ///
-    /// Must not be called if the mutator is already pinned!
+    /// Must not be called if the handle is already pinned!
     #[inline]
-    pub fn set_pinned(&self) {
-        let epoch = global::EPOCH.load(Relaxed);
+    pub fn set_pinned(&self, epoch: usize) {
         let state = epoch | 1;
 
         // Now we must store `state` into `self.state`. It's important that any succeeding loads
-        // don't get reordered with this store. In order words, this mutator's epoch must be fully
-        // announced to other mutators. Only then it becomes safe to load from the shared memory.
+        // don't get reordered with this store. In order words, this handle's epoch must be fully
+        // announced to other handles. Only then it becomes safe to load from the shared memory.
         if cfg!(any(target_arch = "x86", target_arch = "x86_64")) {
             // On x86 architectures we have a choice:
             // 1. `atomic::fence(SeqCst)`, which compiles to a `mfence` instruction.
@@ -226,7 +234,7 @@ impl LocalEpoch {
         }
     }
 
-    /// Marks the mutator as unpinned.
+    /// Marks the handle as unpinned.
     #[inline]
     pub fn set_unpinned(&self) {
         // Clear the last bit.
@@ -235,11 +243,11 @@ impl LocalEpoch {
     }
 }
 
-impl Scope {
+impl<'scope> Scope<'scope> {
     unsafe fn defer_garbage(&self, mut garbage: Garbage) {
         self.bag.as_mut().map(|bag| {
             while let Err(g) = bag.try_push(garbage) {
-                global::push_bag(bag, self);
+                self.global.push_bag(bag, self);
                 garbage = g;
             }
         });
@@ -273,10 +281,10 @@ impl Scope {
         unsafe {
             self.bag.as_mut().map(|bag| {
                 if !bag.is_empty() {
-                    global::push_bag(bag, self);
+                    self.global.push_bag(bag, self);
                 }
 
-                global::collect(self);
+                self.global.collect(self);
             });
         }
     }
