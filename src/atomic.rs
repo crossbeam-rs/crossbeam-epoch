@@ -958,6 +958,38 @@ impl<'scope, T> Ptr<'scope, T> {
         self.as_raw().as_ref()
     }
 
+    /// Drops and deallocates the pointee.
+    ///
+    /// Calling this method on `p` is equivalent to:
+    ///
+    /// ```no_compile
+    /// drop(Box::from_raw(p.as_raw() as *mut T));
+    /// ```
+    ///
+    /// # Safety
+    ///
+    /// This method may be called only if the pointer is valid and the object pointed to won't be
+    /// accessed again in the future. Of course, calling this method on the same object twice is
+    /// illegal.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use crossbeam_epoch::{self as epoch, Atomic};
+    /// use std::sync::atomic::Ordering::SeqCst;
+    ///
+    /// let a = Atomic::new(1234);
+    /// unsafe {
+    ///     epoch::unprotected(|scope| {
+    ///         let p = a.load(SeqCst, scope);
+    ///         p.destroy();
+    ///     });
+    /// }
+    /// ```
+    pub unsafe fn destroy(self) {
+        drop(Box::from_raw(self.as_raw() as *mut T));
+    }
+
     /// Returns the tag stored within the pointer.
     ///
     /// # Examples
