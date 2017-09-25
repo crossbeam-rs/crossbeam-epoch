@@ -5,7 +5,8 @@
 //! Michael and Scott.  Simple, Fast, and Practical Non-Blocking and Blocking Concurrent Queue
 //! Algorithms.  PODC 1996.  http://dl.acm.org/citation.cfm?id=248106
 
-use std::{mem, ptr};
+use std::mem::{self, ManuallyDrop};
+use std::ptr;
 use std::sync::atomic::Ordering::{Relaxed, Acquire, Release};
 
 use {Atomic, Owned, Ptr, Scope, pin, unprotected};
@@ -22,9 +23,11 @@ pub struct Queue<T> {
 
 #[derive(Debug)]
 struct Node<T> {
-    data: T,
+    data: ManuallyDrop<T>,
     next: Atomic<Node<T>>,
 }
+
+unsafe impl<T> Send for Node<T> {}
 
 // Any particular `T` should never be accessed concurrently, so no need for Sync.
 unsafe impl<T: Send> Sync for Queue<T> {}
@@ -79,7 +82,7 @@ impl<T> Queue<T> {
     /// Add `t` to the back of the queue, possibly waking up threads blocked on `pop`.
     pub fn push(&self, t: T, scope: &Scope) {
         let new = Owned::new(Node {
-            data: t,
+            data: ManuallyDrop::new(t),
             next: Atomic::null(),
         });
         let new = Owned::into_ptr(new, scope);
@@ -106,8 +109,8 @@ impl<T> Queue<T> {
                 self.head
                     .compare_and_set(head, next, Release, scope)
                     .map(|_| {
-                        scope.defer_free(head);
-                        Some(ptr::read(&n.data))
+                        scope.defer(move || drop(head.into_owned()));
+                        Some(ManuallyDrop::into_inner(ptr::read(&n.data)))
                     })
                     .map_err(|_| ())
             },
@@ -131,8 +134,8 @@ impl<T> Queue<T> {
                 self.head
                     .compare_and_set(head, next, Release, scope)
                     .map(|_| {
-                        scope.defer_free(head);
-                        Some(ptr::read(&n.data))
+                        scope.defer(move || drop(head.into_owned()));
+                        Some(ManuallyDrop::into_inner(ptr::read(&n.data)))
                     })
                     .map_err(|_| ())
             },
@@ -184,8 +187,8 @@ impl<T> Drop for Queue<T> {
                 while let Some(_) = self.try_pop(scope) {}
 
                 // Destroy the remaining sentinel node.
-                let sentinel = self.head.load(Relaxed, scope).as_raw() as *mut Node<T>;
-                drop(Vec::from_raw_parts(sentinel, 0, 1));
+                let sentinel = self.head.load(Relaxed, scope);
+                drop(sentinel.into_owned());
             })
         }
     }

@@ -3,6 +3,7 @@
 //! Michael.  High Performance Dynamic Lock-Free Hash Tables and List-Based Sets.  SPAA 2002.
 //! http://dl.acm.org/citation.cfm?id=564870.564881
 
+use std::mem::ManuallyDrop;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 
 use {Atomic, Owned, Ptr, Scope, unprotected};
@@ -12,12 +13,14 @@ use crossbeam_utils::cache_padded::CachePadded;
 /// An entry in the linked list.
 struct NodeInner<T> {
     /// The data in the entry.
-    data: T,
+    data: ManuallyDrop<T>,
 
     /// The next entry in the linked list.
     /// If the tag is 1, this entry is marked as deleted.
     next: Atomic<Node<T>>,
 }
+
+unsafe impl<T> Send for NodeInner<T> {}
 
 pub struct Node<T>(CachePadded<NodeInner<T>>);
 
@@ -46,7 +49,7 @@ impl<T> Node<T> {
     /// Returns the data in this entry.
     fn new(data: T) -> Self {
         Node(CachePadded::new(NodeInner {
-            data: data,
+            data: ManuallyDrop::new(data),
             next: Atomic::null(),
         }))
     }
@@ -120,7 +123,7 @@ impl<T> Drop for List<T> {
                 let mut curr = self.head.load(Relaxed, scope);
                 while let Some(c) = curr.as_ref() {
                     let succ = c.0.next.load(Relaxed, scope);
-                    drop(curr.into_owned());
+                    ManuallyDrop::drop(&mut curr.into_owned().0.data);
                     curr = succ;
                 }
             });
@@ -145,7 +148,8 @@ impl<'scope, T> Iter<'scope, T> {
                 ) {
                     Ok(_) => {
                         unsafe {
-                            self.scope.defer_free(self.curr);
+                            let p = self.curr;
+                            self.scope.defer(move || drop(p.into_owned()));
                         }
                         self.curr = succ;
                     }
