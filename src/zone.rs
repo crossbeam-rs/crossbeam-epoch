@@ -24,8 +24,8 @@ use sync::queue::Queue;
 ///
 /// let zone = epoch::Zone::new();
 ///
-/// let handle = epoch::Handle.new(&zone);
-/// let handle.pin(|scope| {
+/// let handle = epoch::Handle::new(&zone);
+/// handle.pin(|scope| {
 ///     scope.flush();
 /// });
 /// ```
