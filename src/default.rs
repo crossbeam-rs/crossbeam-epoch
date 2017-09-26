@@ -1,21 +1,21 @@
-//! The default zone for garbage collection.
+//! The default collector for garbage collection.
 //!
-//! For each thread, a handle is lazily initialized on its first use, when the current thread is
-//! registered in the default zone.  If initialized, the thread's handle will get destructed on
+//! For each thread, a mutator is lazily initialized on its first use, when the current thread is
+//! registered in the default collector.  If initialized, the thread's mutator will get destructed on
 //! thread exit, which in turn unregisters the thread.
 
-use zone::Zone;
-use handle::{Handle, Scope};
+use collector::Collector;
+use mutator::{Mutator, Scope};
 
 lazy_static! {
     /// The default global data.
     // FIXME(jeehoonkang): accessing globals in `lazy_static!` is blocking.
-    pub static ref ZONE: Zone = Zone::new();
+    pub static ref COLLECTOR: Collector = Collector::new();
 }
 
 thread_local! {
-    /// The thread-local handle for the default global data.
-    static HANDLE: Handle<'static> = Handle::new(&ZONE);
+    /// The thread-local mutator for the default global data.
+    static MUTATOR: Mutator<'static> = Mutator::new(&COLLECTOR);
 }
 
 /// Pin the current thread.
@@ -24,13 +24,13 @@ where
     F: FnOnce(&Scope) -> R,
 {
     // FIXME(jeehoonkang): thread-local storage may be destructed at the time `pin()` is called. For
-    // that case, we should use `HANDLE.try_with()` instead.
-    HANDLE.with(|handle| handle.pin(f))
+    // that case, we should use `MUTATOR.try_with()` instead.
+    MUTATOR.with(|mutator| mutator.pin(f))
 }
 
 /// Check if the current thread is pinned.
 pub fn is_pinned() -> bool {
     // FIXME(jeehoonkang): thread-local storage may be destructed at the time `pin()` is called. For
-    // that case, we should use `HANDLE.try_with()` instead.
-    HANDLE.with(|handle| handle.is_pinned())
+    // that case, we should use `MUTATOR.try_with()` instead.
+    MUTATOR.with(|mutator| mutator.is_pinned())
 }

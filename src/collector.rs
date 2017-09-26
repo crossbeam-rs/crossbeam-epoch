@@ -1,37 +1,37 @@
-//! The garbage collection zone.
+//! The garbage collector.
 //!
 //! # Registration
 //!
-//! In order to track all handles in one place, we need some form of handle registration. When a
-//! handle is created, it is registered to a global lock-free singly-linked list of registries; and
-//! when a handle is dropped, it is unregistered from the list.
+//! In order to track all mutators in one place, we need some form of mutator registration. When a
+//! mutator is created, it is registered to a global lock-free singly-linked list of registries; and
+//! when a mutator is dropped, it is unregistered from the list.
 
 use std::cmp;
 use std::sync::atomic::Ordering::{Relaxed, SeqCst};
-use handle::{LocalEpoch, Scope, unprotected};
+use mutator::{LocalEpoch, Scope, unprotected};
 use garbage::Bag;
 use epoch::Epoch;
 use sync::list::{List, Node};
 use sync::queue::Queue;
 
 
-/// The global data for epoch-based memory reclamation.
+/// A garbage collector.
 ///
 /// # Examples
 ///
 /// ```
 /// use crossbeam_epoch as epoch;
 ///
-/// let zone = epoch::Zone::new();
+/// let collector = epoch::Collector::new();
 ///
-/// let handle = epoch::Handle::new(&zone);
-/// handle.pin(|scope| {
+/// let mutator = epoch::Mutator::new(&collector);
+/// mutator.pin(|scope| {
 ///     scope.flush();
 /// });
 /// ```
 #[derive(Debug)]
-pub struct Zone {
-    /// The head pointer of the list of handle registries.
+pub struct Collector {
+    /// The head pointer of the list of mutator registries.
     registries: List<LocalEpoch>,
     /// A reference to the global queue of garbages.
     garbages: Queue<(usize, Bag)>,
@@ -39,12 +39,12 @@ pub struct Zone {
     epoch: Epoch,
 }
 
-impl Zone {
+impl Collector {
     /// Number of bags to destroy.
     const COLLECT_STEPS: usize = 8;
 
     pub fn new() -> Self {
-        Zone {
+        Collector {
             registries: List::new(),
             garbages: Queue::new(),
             epoch: Epoch::new(),
@@ -86,7 +86,7 @@ impl Zone {
         }
     }
 
-    /// Register a handle in the memory reclamation zone.
+    /// Register a mutator in the collector.
     pub fn register<'scope>(&'scope self) -> &'scope Node<LocalEpoch> {
         unsafe {
             // Since we dereference no pointers in this block, it is safe to use `unprotected`.
