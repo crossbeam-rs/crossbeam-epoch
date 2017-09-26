@@ -6,12 +6,13 @@
 //! mutator is created, it is registered to a global lock-free singly-linked list of registries; and
 //! when a mutator is dropped, it is unregistered from the list.
 
+use std::cell::{Cell, UnsafeCell};
 use std::cmp;
 use std::sync::atomic::Ordering::{Relaxed, SeqCst};
-use mutator::{LocalEpoch, Scope, unprotected};
+use mutator::{Mutator, LocalEpoch, Scope, unprotected};
 use garbage::Bag;
 use epoch::Epoch;
-use sync::list::{List, Node};
+use sync::list::List;
 use sync::queue::Queue;
 
 
@@ -24,7 +25,7 @@ use sync::queue::Queue;
 ///
 /// let collector = epoch::Collector::new();
 ///
-/// let mutator = epoch::Mutator::new(&collector);
+/// let mutator = collector.add_mutator();
 /// mutator.pin(|scope| {
 ///     scope.flush();
 /// });
@@ -86,9 +87,8 @@ impl Collector {
         }
     }
 
-    /// Register a mutator in the collector.
-    pub fn register<'scope>(&'scope self) -> &'scope Node<LocalEpoch> {
-        unsafe {
+    pub fn add_mutator<'scope>(&'scope self) -> Mutator<'scope> {
+        let local_epoch = unsafe {
             // Since we dereference no pointers in this block, it is safe to use `unprotected`.
             unprotected(|scope| {
                 &*self
@@ -96,6 +96,14 @@ impl Collector {
                     .insert_head(LocalEpoch::new(), scope)
                     .as_raw()
             })
+        };
+
+        Mutator {
+            collector: self,
+            bag: UnsafeCell::new(Bag::new()),
+            local_epoch: local_epoch,
+            is_pinned: Cell::new(false),
+            pin_count: Cell::new(0),
         }
     }
 

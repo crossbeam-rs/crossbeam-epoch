@@ -15,7 +15,7 @@ lazy_static! {
 
 thread_local! {
     /// The thread-local mutator for the default global data.
-    static MUTATOR: Mutator<'static> = Mutator::new(&COLLECTOR);
+    static MUTATOR: Mutator<'static> = COLLECTOR.add_mutator();
 }
 
 /// Pin the current thread.
