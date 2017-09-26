@@ -56,7 +56,9 @@ impl<T> Node<T> {
     pub fn get(&self) -> &T {
         &self.0.data
     }
+}
 
+impl<T: 'static> Node<T> {
     /// Marks this entry as deleted.
     pub fn delete<'scope>(&self, scope: &Scope) {
         self.0.next.fetch_or(1, Release, scope);
@@ -147,6 +149,8 @@ impl<'scope, T> Iter<'scope, T> {
                 ) {
                     Ok(_) => {
                         unsafe {
+                            // Deferred drop of `T` is scheduled here.
+                            // This is okay because `.delete()` can be called only if `T: 'static`.
                             let p = self.curr;
                             self.scope.defer(move || drop(p.into_owned()));
                         }
