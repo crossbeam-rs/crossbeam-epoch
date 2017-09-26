@@ -41,10 +41,12 @@ mod atomic;
 mod deferred;
 mod epoch;
 mod garbage;
-mod global;
+mod realm;
 mod handle;
+mod default;
 mod sync;
 
 pub use self::atomic::{Atomic, CompareAndSetOrdering, Owned, Ptr};
-pub use self::handle::{Scope, unprotected};
-pub use self::global::{pin, is_pinned};
+pub use self::realm::Realm;
+pub use self::handle::{Handle, Scope, unprotected};
+pub use self::default::{pin, is_pinned};
