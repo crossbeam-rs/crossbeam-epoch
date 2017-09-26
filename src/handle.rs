@@ -1,4 +1,4 @@
-//! Handle: reference to a garbage collection realm
+//! Handle: reference to a garbage collection zone
 //!
 //! # Pinning
 //!
@@ -17,13 +17,13 @@ use std::sync::atomic::Ordering::{Relaxed, Release, SeqCst};
 
 use sync::list::Node;
 use garbage::{Garbage, Bag};
-use realm::Realm;
+use zone::Zone;
 
 
-/// Reference to a garbage collection realm
+/// Reference to a garbage collection zone
 pub struct Handle<'scope> {
     /// A reference to the global data.
-    realm: &'scope Realm,
+    zone: &'scope Zone,
     /// The local garbage objects that will be later freed.
     bag: UnsafeCell<Bag>,
     /// This handle's entry in the local epoch list.
@@ -55,7 +55,7 @@ pub struct LocalEpoch {
 #[derive(Debug)]
 pub struct Scope<'scope> {
     /// A reference to the global data.
-    realm: &'scope Realm,
+    zone: &'scope Zone,
     /// The local garbage bag.
     bag: *mut Bag, // !Send + !Sync
 }
@@ -65,9 +65,9 @@ impl<'scope> Handle<'scope> {
     /// Number of pinnings after which a handle will collect some global garbage.
     const PINS_BETWEEN_COLLECT: usize = 128;
 
-    pub fn new(realm: &'scope Realm) -> Self {
+    pub fn new(zone: &'scope Zone) -> Self {
         Handle {
-            realm: realm,
+            zone: zone,
             bag: UnsafeCell::new(Bag::new()),
             local_epoch: unsafe {
                 // Since we dereference no pointers in this block, it is safe to use `unprotected`.
@@ -106,7 +106,7 @@ impl<'scope> Handle<'scope> {
         F: FnOnce(&Scope) -> R,
     {
         let local_epoch = self.local_epoch.get();
-        let scope = &Scope { realm: self.realm, bag: self.bag.get() };
+        let scope = &Scope { zone: self.zone, bag: self.bag.get() };
 
         let was_pinned = self.is_pinned.get();
         if !was_pinned {
@@ -116,12 +116,12 @@ impl<'scope> Handle<'scope> {
 
             // Pin the handle.
             self.is_pinned.set(true);
-            let epoch = self.realm.get_epoch();
+            let epoch = self.zone.get_epoch();
             local_epoch.set_pinned(epoch);
 
             // If the counter progressed enough, try advancing the epoch and collecting garbage.
             if count % Self::PINS_BETWEEN_COLLECT == 0 {
-                self.realm.collect(scope);
+                self.zone.collect(scope);
             }
         }
 
@@ -150,14 +150,14 @@ impl<'scope> Drop for Handle<'scope> {
 
         self.pin(|scope| {
             // Spare some cycles on garbage collection.
-            self.realm.collect(scope);
+            self.zone.collect(scope);
 
             // Unregister the handle by marking this entry as deleted.
             self.local_epoch.delete(scope);
 
             // Push the local bag into the global garbage queue.
             unsafe {
-                self.realm.push_bag(&mut *self.bag.get(), scope);
+                self.zone.push_bag(&mut *self.bag.get(), scope);
             }
         });
     }
@@ -182,7 +182,7 @@ pub unsafe fn unprotected<F, R>(f: F) -> R
 where
     F: FnOnce(&Scope) -> R,
 {
-    let scope = &Scope { realm: mem::uninitialized(), bag: ptr::null_mut() };
+    let scope = &Scope { zone: mem::uninitialized(), bag: ptr::null_mut() };
     f(scope)
 }
 
@@ -241,7 +241,7 @@ impl<'scope> Scope<'scope> {
     unsafe fn defer_garbage(&self, mut garbage: Garbage) {
         self.bag.as_mut().map(|bag| {
             while let Err(g) = bag.try_push(garbage) {
-                self.realm.push_bag(bag, self);
+                self.zone.push_bag(bag, self);
                 garbage = g;
             }
         });
@@ -275,10 +275,10 @@ impl<'scope> Scope<'scope> {
         unsafe {
             self.bag.as_mut().map(|bag| {
                 if !bag.is_empty() {
-                    self.realm.push_bag(bag, self);
+                    self.zone.push_bag(bag, self);
                 }
 
-                self.realm.collect(self);
+                self.zone.collect(self);
             });
         }
     }
@@ -296,8 +296,8 @@ mod tests {
 
     #[test]
     fn pin_reentrant() {
-        let realm = Realm::new();
-        let handle = Handle::new(&realm);
+        let zone = Zone::new();
+        let handle = Handle::new(&zone);
 
         assert!(!handle.is_pinned());
         handle.pin(|_| {
@@ -311,17 +311,17 @@ mod tests {
 
     #[test]
     fn pin_holds_advance() {
-        let realm = Realm::new();
+        let zone = Zone::new();
 
         let threads = (0..NUM_THREADS)
             .map(|_| {
                 scoped::scope(|scope| {
                     scope.spawn(|| for _ in 0..100_000 {
-                        let handle = Handle::new(&realm);
+                        let handle = Handle::new(&zone);
                         handle.pin(|scope| {
-                            let before = realm.get_epoch();
-                            realm.collect(scope);
-                            let after = realm.get_epoch();
+                            let before = zone.get_epoch();
+                            zone.collect(scope);
+                            let after = zone.get_epoch();
 
                             assert!(after.wrapping_sub(before) <= 2);
                         });

@@ -1,4 +1,4 @@
-//! The garbage collection realm.
+//! The garbage collection zone.
 //!
 //! # Registration
 //!
@@ -16,8 +16,21 @@ use sync::queue::Queue;
 
 
 /// The global data for epoch-based memory reclamation.
+///
+/// # Examples
+///
+/// ```
+/// use crossbeam_epoch as epoch;
+///
+/// let zone = epoch::Zone::new();
+///
+/// let handle = epoch::Handle.new(&zone);
+/// let handle.pin(|scope| {
+///     scope.flush();
+/// });
+/// ```
 #[derive(Debug)]
-pub struct Realm {
+pub struct Zone {
     /// The head pointer of the list of handle registries.
     registries: List<LocalEpoch>,
     /// A reference to the global queue of garbages.
@@ -26,12 +39,12 @@ pub struct Realm {
     epoch: Epoch,
 }
 
-impl Realm {
+impl Zone {
     /// Number of bags to destroy.
     const COLLECT_STEPS: usize = 8;
 
     pub fn new() -> Self {
-        Realm {
+        Zone {
             registries: List::new(),
             garbages: Queue::new(),
             epoch: Epoch::new(),
@@ -73,7 +86,7 @@ impl Realm {
         }
     }
 
-    /// Register a handle in the memory reclamation realm.
+    /// Register a handle in the memory reclamation zone.
     pub fn register<'scope>(&'scope self) -> &'scope Node<LocalEpoch> {
         unsafe {
             // Since we dereference no pointers in this block, it is safe to use `unprotected`.

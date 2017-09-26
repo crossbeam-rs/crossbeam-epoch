@@ -1,21 +1,21 @@
-//! The default realm for garbage collection.
+//! The default zone for garbage collection.
 //!
 //! For each thread, a handle is lazily initialized on its first use, when the current thread is
-//! registered in the default realm.  If initialized, the thread's handle will get destructed on
+//! registered in the default zone.  If initialized, the thread's handle will get destructed on
 //! thread exit, which in turn unregisters the thread.
 
-use realm::Realm;
+use zone::Zone;
 use handle::{Handle, Scope};
 
 lazy_static! {
     /// The default global data.
     // FIXME(jeehoonkang): accessing globals in `lazy_static!` is blocking.
-    pub static ref REALM: Realm = Realm::new();
+    pub static ref ZONE: Zone = Zone::new();
 }
 
 thread_local! {
     /// The thread-local handle for the default global data.
-    static HANDLE: Handle<'static> = Handle::new(&REALM);
+    static HANDLE: Handle<'static> = Handle::new(&ZONE);
 }
 
 /// Pin the current thread.
