@@ -1,8 +1,8 @@
 //! The default collector for garbage collection.
 //!
 //! For each thread, a mutator is lazily initialized on its first use, when the current thread is
-//! registered in the default collector.  If initialized, the thread's mutator will get destructed on
-//! thread exit, which in turn unregisters the thread.
+//! registered in the default collector.  If initialized, the thread's mutator will get destructed
+//! on thread exit, which in turn unregisters the thread.
 
 use collector::Collector;
 use mutator::{Mutator, Scope};

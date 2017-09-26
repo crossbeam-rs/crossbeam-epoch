@@ -52,6 +52,12 @@ impl Collector {
         }
     }
 
+    /// Get the global epoch.
+    #[inline]
+    pub fn get_epoch(&self) -> usize {
+        self.epoch.load(Relaxed)
+    }
+
     /// Pushes the bag onto the global queue and replaces the bag with a new empty bag.
     #[inline]
     pub fn push_bag<'scope>(&self, bag: &mut Bag, scope: &'scope Scope) {
@@ -87,12 +93,12 @@ impl Collector {
         }
     }
 
+    /// Add a mutator.
     pub fn add_mutator<'scope>(&'scope self) -> Mutator<'scope> {
         let local_epoch = unsafe {
             // Since we dereference no pointers in this block, it is safe to use `unprotected`.
             unprotected(|scope| {
-                &*self
-                    .registries
+                &*self.registries
                     .insert_head(LocalEpoch::new(), scope)
                     .as_raw()
             })
@@ -105,9 +111,5 @@ impl Collector {
             is_pinned: Cell::new(false),
             pin_count: Cell::new(0),
         }
-    }
-
-    pub fn get_epoch(&self) -> usize {
-        self.epoch.load(Relaxed)
     }
 }

@@ -109,7 +109,10 @@ impl<'scope> Mutator<'scope> {
         F: FnOnce(&Scope) -> R,
     {
         let local_epoch = self.local_epoch.get();
-        let scope = &Scope { collector: self.collector, bag: self.bag.get() };
+        let scope = &Scope {
+            collector: self.collector,
+            bag: self.bag.get(),
+        };
 
         let was_pinned = self.is_pinned.get();
         if !was_pinned {
@@ -185,7 +188,10 @@ pub unsafe fn unprotected<F, R>(f: F) -> R
 where
     F: FnOnce(&Scope) -> R,
 {
-    let scope = &Scope { collector: mem::uninitialized(), bag: ptr::null_mut() };
+    let scope = &Scope {
+        collector: mem::uninitialized(),
+        bag: ptr::null_mut(),
+    };
     f(scope)
 }
 
