@@ -152,7 +152,7 @@ impl<'scope, T> Iter<'scope, T> {
                             // Deferred drop of `T` is scheduled here.
                             // This is okay because `.delete()` can be called only if `T: 'static`.
                             let p = self.curr;
-                            self.scope.defer(move || drop(p.into_owned()));
+                            self.scope.defer(move || p.into_owned());
                         }
                         self.curr = succ;
                     }

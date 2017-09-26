@@ -248,8 +248,8 @@ impl Scope {
     }
 
     /// Deferred execution of an arbitrary function `f`.
-    pub unsafe fn defer<F: FnOnce() + Send>(&self, f: F) {
-        self.defer_garbage(Garbage::new(f))
+    pub unsafe fn defer<R, F: FnOnce() -> R + Send>(&self, f: F) {
+        self.defer_garbage(Garbage::new(|| drop(f())))
     }
 
     /// Flushes all garbage in the thread-local storage into the global garbage queue, attempts to

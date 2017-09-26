@@ -109,7 +109,7 @@ impl<T> Queue<T> {
                 self.head
                     .compare_and_set(head, next, Release, scope)
                     .map(|_| {
-                        scope.defer(move || drop(head.into_owned()));
+                        scope.defer(move || head.into_owned());
                         Some(ManuallyDrop::into_inner(ptr::read(&n.data)))
                     })
                     .map_err(|_| ())
@@ -134,7 +134,7 @@ impl<T> Queue<T> {
                 self.head
                     .compare_and_set(head, next, Release, scope)
                     .map(|_| {
-                        scope.defer(move || drop(head.into_owned()));
+                        scope.defer(move || head.into_owned());
                         Some(ManuallyDrop::into_inner(ptr::read(&n.data)))
                     })
                     .map_err(|_| ())
