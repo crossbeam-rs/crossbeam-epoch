@@ -248,6 +248,15 @@ impl Scope {
     }
 
     /// Deferred execution of an arbitrary function `f`.
+    ///
+    /// This function inserts the function into a mutator-local [`Bag`]. When the bag becomes full,
+    /// the bag is flushed into the globally shared queue of bags.
+    ///
+    /// If this function is destroying a particularly large object, it is wise to follow up with a
+    /// call to [`flush`] so that it doesn't get stuck waiting in the local bag for a long time.
+    ///
+    /// [`Bag`]: struct.Bag.html
+    /// [`flush`]: fn.flush.html
     pub unsafe fn defer<R, F: FnOnce() -> R + Send>(&self, f: F) {
         self.defer_garbage(Garbage::new(|| drop(f())))
     }
