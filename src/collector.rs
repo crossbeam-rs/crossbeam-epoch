@@ -2,17 +2,18 @@
 //!
 //! # Registration
 //!
-//! In order to track all mutators in one place, we need some form of mutator registration. When a
-//! mutator is created, it is registered to a global lock-free singly-linked list of registries; and
-//! when a mutator is dropped, it is unregistered from the list.
+//! In order to track all handles in one place, we need some form of handle registration. When a
+//! handle is created, it is registered to a global lock-free singly-linked list of registries; and
+//! when a handle is dropped, it is unregistered from the list.
 
-use std::cell::{Cell, UnsafeCell};
 use std::cmp;
-use std::sync::atomic::Ordering::{Relaxed, SeqCst};
-use mutator::{Mutator, LocalEpoch, Scope, unprotected};
+use std::ops::Deref;
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
+use handle::{Handle, LocalEpoch, Scope, unprotected};
 use garbage::Bag;
 use epoch::Epoch;
-use sync::list::List;
+use sync::list::{List, Node};
 use sync::queue::Queue;
 
 
@@ -25,14 +26,18 @@ use sync::queue::Queue;
 ///
 /// let collector = epoch::Collector::new();
 ///
-/// let mutator = collector.add_mutator();
-/// mutator.pin(|scope| {
+/// let handle = collector.add_handle();
+/// handle.pin(|scope| {
 ///     scope.flush();
 /// });
 /// ```
 #[derive(Debug)]
-pub struct Collector {
-    /// The head pointer of the list of mutator registries.
+pub struct Collector(Arc<Global>);
+
+/// The global data for a garbage collector.
+#[derive(Debug)]
+pub struct Global {
+    /// The head pointer of the list of handle registries.
     registries: List<LocalEpoch>,
     /// A reference to the global queue of garbages.
     garbages: Queue<(usize, Bag)>,
@@ -41,29 +46,47 @@ pub struct Collector {
 }
 
 impl Collector {
-    /// Number of bags to destroy.
-    const COLLECT_STEPS: usize = 8;
-
     pub fn new() -> Self {
-        Collector {
+        Self { 0: Arc::new(Global::new()) }
+    }
+
+    pub fn add_handle(&self) -> Handle {
+        Handle::new(&self.0)
+    }
+}
+
+impl Deref for Collector {
+    type Target = Global;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Global {
+    fn new() -> Self {
+        Self {
             registries: List::new(),
             garbages: Queue::new(),
             epoch: Epoch::new(),
         }
     }
 
+    /// Number of bags to destroy.
+    const COLLECT_STEPS: usize = 8;
+
     /// Get the global epoch.
     #[inline]
     pub fn get_epoch(&self) -> usize {
-        self.epoch.load(Relaxed)
+        self.epoch.load(Ordering::Relaxed)
     }
 
     /// Pushes the bag onto the global queue and replaces the bag with a new empty bag.
     #[inline]
     pub fn push_bag<'scope>(&self, bag: &mut Bag, scope: &'scope Scope) {
-        let epoch = self.epoch.load(Relaxed);
+        let epoch = self.epoch.load(Ordering::Relaxed);
         let bag = ::std::mem::replace(bag, Bag::new());
-        ::std::sync::atomic::fence(SeqCst);
+        ::std::sync::atomic::fence(Ordering::SeqCst);
         self.garbages.push((epoch, bag), scope);
     }
 
@@ -93,23 +116,13 @@ impl Collector {
         }
     }
 
-    /// Add a mutator.
-    pub fn add_mutator<'scope>(&'scope self) -> Mutator<'scope> {
-        let local_epoch = unsafe {
+    /// Register a handle.
+    pub fn register(&self) -> *const Node<LocalEpoch> {
+        unsafe {
             // Since we dereference no pointers in this block, it is safe to use `unprotected`.
             unprotected(|scope| {
-                &*self.registries
-                    .insert_head(LocalEpoch::new(), scope)
-                    .as_raw()
+                self.registries.insert(LocalEpoch::new(), scope).as_raw()
             })
-        };
-
-        Mutator {
-            collector: self,
-            bag: UnsafeCell::new(Bag::new()),
-            local_epoch: local_epoch,
-            is_pinned: Cell::new(false),
-            pin_count: Cell::new(0),
         }
     }
 }

@@ -8,14 +8,14 @@
 //!
 //! # Pinning
 //!
-//! Before an [`Atomic`] can be loaded, the current mutator must be [`pin`]ned. By pinning a mutator
+//! Before an [`Atomic`] can be loaded, the current handle must be [`pin`]ned. By pinning a handle
 //! we declare that any object that gets removed from now on must not be destructed just
-//! yet. Garbage collection of newly removed objects is suspended until the mutator gets unpinned.
+//! yet. Garbage collection of newly removed objects is suspended until the handle gets unpinned.
 //!
 //! # Garbage
 //!
 //! Objects that get removed from concurrent collections must be stashed away until all currently
-//! pinned mutators get unpinned. Such objects can be stored into a [`Garbage`], where they are kept
+//! pinned handles get unpinned. Such objects can be stored into a [`Garbage`], where they are kept
 //! until the right time for their destruction comes.
 //!
 //! There is a global shared instance of garbage queue, which can deallocate ([`defer_free`]) or
@@ -42,11 +42,11 @@ mod deferred;
 mod epoch;
 mod garbage;
 mod collector;
-mod mutator;
+mod handle;
 mod default;
 mod sync;
 
 pub use self::atomic::{Atomic, CompareAndSetOrdering, Owned, Ptr};
 pub use self::collector::Collector;
-pub use self::mutator::{Mutator, Scope, unprotected};
+pub use self::handle::{Handle, Scope, unprotected};
 pub use self::default::{pin, is_pinned};
