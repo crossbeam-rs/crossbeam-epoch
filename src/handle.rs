@@ -59,7 +59,7 @@ pub struct LocalEpoch {
 /// implement `Send` nor `Sync`.
 ///
 /// [`Atomic`]: struct.Atomic.html
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct Scope<'scope> {
     /// A reference to the global data.
     global: &'scope Global,
@@ -105,10 +105,10 @@ impl Handle {
     /// [`Atomic`]: struct.Atomic.html
     pub fn pin<F, R>(&self, f: F) -> R
     where
-        F: FnOnce(&Scope) -> R,
+        F: for<'scope> FnOnce(Scope<'scope>) -> R,
     {
         let local_epoch = unsafe { (*self.local_epoch).get() };
-        let scope = &Scope {
+        let scope = Scope {
             global: &self.global,
             bag: self.bag.get(),
         };
@@ -193,9 +193,9 @@ impl Drop for Handle {
 #[inline]
 pub unsafe fn unprotected<F, R>(f: F) -> R
 where
-    F: FnOnce(&Scope) -> R,
+    F: for<'scope> FnOnce(Scope<'scope>) -> R,
 {
-    let scope = &Scope {
+    let scope = Scope {
         global: mem::uninitialized(),
         bag: ptr::null_mut(),
     };
@@ -250,7 +250,7 @@ impl LocalEpoch {
 }
 
 impl<'scope> Scope<'scope> {
-    unsafe fn defer_garbage(&self, mut garbage: Garbage) {
+    unsafe fn defer_garbage(self, mut garbage: Garbage) {
         self.bag.as_mut().map(|bag| {
             while let Err(g) = bag.try_push(garbage) {
                 self.global.push_bag(bag, self);
@@ -269,7 +269,7 @@ impl<'scope> Scope<'scope> {
     ///
     /// [`Bag`]: struct.Bag.html
     /// [`flush`]: fn.flush.html
-    pub unsafe fn defer<R, F: FnOnce() -> R + Send>(&self, f: F) {
+    pub unsafe fn defer<R, F: FnOnce() -> R + Send>(self, f: F) {
         self.defer_garbage(Garbage::new(|| drop(f())))
     }
 
@@ -283,7 +283,7 @@ impl<'scope> Scope<'scope> {
     /// [`defer_drop`], so that it isn't sitting in the local bag for a long time.
     ///
     /// [`defer_free`]: fn.defer_free.html [`defer_drop`]: fn.defer_drop.html
-    pub fn flush(&self) {
+    pub fn flush(self) {
         unsafe {
             self.bag.as_mut().map(|bag| {
                 if !bag.is_empty() {
