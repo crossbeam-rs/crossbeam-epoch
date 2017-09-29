@@ -65,7 +65,12 @@ impl<T> Queue<T> {
     /// Attempts to atomically place `n` into the `next` pointer of `onto`, and returns `true` on
     /// success. The queue's `tail` pointer may be updated.
     #[inline(always)]
-    fn push_internal<'scope>(&'scope self, onto: Ptr<Node<T>>, new: Ptr<Node<T>>, scope: Scope<'scope>) -> bool {
+    fn push_internal<'scope>(
+        &'scope self,
+        onto: Ptr<Node<T>>,
+        new: Ptr<Node<T>>,
+        scope: Scope<'scope>,
+    ) -> bool {
         // is `onto` the actual tail?
         let o = unsafe { onto.deref() };
         let next = o.next.load(Acquire, scope);
@@ -128,7 +133,11 @@ impl<T> Queue<T> {
     /// Attempts to pop a data node, if the data satisfies the given condition. `Ok(None)` if queue
     /// is empty or the data does not satisfy the condition; `Err(())` if lost race to pop.
     #[inline(always)]
-    fn pop_if_internal<'scope, F>(&'scope self, condition: F, scope: Scope<'scope>) -> Result<Option<T>, ()>
+    fn pop_if_internal<'scope, F>(
+        &'scope self,
+        condition: F,
+        scope: Scope<'scope>,
+    ) -> Result<Option<T>, ()>
     where
         T: Sync,
         F: Fn(&T) -> bool,

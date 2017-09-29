@@ -36,7 +36,11 @@ impl Epoch {
     ///
     /// `try_advance()` is annotated `#[cold]` because it is rarely called.
     #[cold]
-    pub fn try_advance<'scope>(&'scope self, registries: &'scope List<LocalEpoch>, scope: Scope<'scope>) -> usize {
+    pub fn try_advance<'scope>(
+        &'scope self,
+        registries: &'scope List<LocalEpoch>,
+        scope: Scope<'scope>,
+    ) -> usize {
         let epoch = self.epoch.load(Relaxed);
         ::std::sync::atomic::fence(SeqCst);
 
