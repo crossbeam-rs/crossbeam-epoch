@@ -51,9 +51,9 @@ pub struct LocalEpoch {
 
 /// A witness that the current handle is pinned.
 ///
-/// A reference to `Scope` is a witness that the current handle is pinned. Lots of methods that
-/// interact with [`Atomic`]s can safely be called only while the handle is pinned so they often
-/// require a reference to `Scope`.
+/// A `Scope` is a witness that the current handle is pinned. Lots of methods that interact with
+/// [`Atomic`]s can safely be called only while the handle is pinned so they often require a
+/// `Scope`.
 ///
 /// This data type is inherently bound to the thread that created it, therefore it does not
 /// implement `Send` nor `Sync`.
@@ -87,9 +87,9 @@ impl Handle {
 
     /// Pins the current handle, executes a function, and unpins the handle.
     ///
-    /// The provided function takes a reference to a `Scope`, which can be used to interact with
-    /// [`Atomic`]s. The scope serves as a proof that whatever data you load from an [`Atomic`] will
-    /// not be concurrently deleted by another handle while the scope is alive.
+    /// The provided function takes a `Scope`, which can be used to interact with [`Atomic`]s. The
+    /// scope serves as a proof that whatever data you load from an [`Atomic`] will not be
+    /// concurrently deleted by another handle while the scope is alive.
     ///
     /// Note that keeping a handle pinned for a long time prevents memory reclamation of any newly
     /// deleted objects protected by [`Atomic`]s. The provided function should be very quick -
