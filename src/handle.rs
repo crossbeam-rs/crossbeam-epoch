@@ -10,8 +10,7 @@
 //! are necessary for performing atomic operations, and for freeing/dropping locations.
 
 use std::cell::{Cell, UnsafeCell};
-use std::ptr;
-use std::mem;
+use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Relaxed, Release, SeqCst};
@@ -25,6 +24,7 @@ use collector::Global;
 // implement in a lock-free manner. However, traversal is rather slow due to cache misses and data
 // dependencies. We should experiment with other data structures as well.
 /// Reference to a garbage collector
+#[derive(Debug)]
 pub struct Handle {
     /// A reference to the global data.
     global: Arc<Global>,
@@ -61,10 +61,10 @@ pub struct LocalEpoch {
 /// [`Atomic`]: struct.Atomic.html
 #[derive(Clone, Copy, Debug)]
 pub struct Scope<'scope> {
-    /// A reference to the global data.
-    global: &'scope Global,
-    /// The local garbage bag.
-    bag: *mut Bag, // !Send + !Sync
+    /// A reference to the handle.
+    handle: Option<&'scope Handle>,
+    /// !Send + !Sync
+    _marker: PhantomData<*mut u8>,
 }
 
 
@@ -109,8 +109,8 @@ impl Handle {
     {
         let local_epoch = unsafe { (*self.local_epoch).get() };
         let scope = Scope {
-            global: &self.global,
-            bag: self.bag.get(),
+            handle: Some(self),
+            _marker: PhantomData,
         };
 
         let was_pinned = self.is_pinned.get();
@@ -196,8 +196,8 @@ where
     F: for<'scope> FnOnce(Scope<'scope>) -> R,
 {
     let scope = Scope {
-        global: mem::uninitialized(),
-        bag: ptr::null_mut(),
+        handle: None,
+        _marker: PhantomData,
     };
     f(scope)
 }
@@ -251,9 +251,10 @@ impl LocalEpoch {
 
 impl<'scope> Scope<'scope> {
     unsafe fn defer_garbage(self, mut garbage: Garbage) {
-        self.bag.as_mut().map(|bag| {
+        self.handle.map(|handle| {
+            let bag = &mut *handle.bag.get();
             while let Err(g) = bag.try_push(garbage) {
-                self.global.push_bag(bag, self);
+                handle.global.push_bag(bag, self);
                 garbage = g;
             }
         });
@@ -285,12 +286,14 @@ impl<'scope> Scope<'scope> {
     /// [`defer_free`]: fn.defer_free.html [`defer_drop`]: fn.defer_drop.html
     pub fn flush(self) {
         unsafe {
-            self.bag.as_mut().map(|bag| {
+            self.handle.map(|handle| {
+                let bag = &mut *handle.bag.get();
+
                 if !bag.is_empty() {
-                    self.global.push_bag(bag, self);
+                    handle.global.push_bag(bag, self);
                 }
 
-                self.global.collect(self);
+                handle.global.collect(self);
             });
         }
     }
