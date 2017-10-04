@@ -72,7 +72,7 @@ impl Handle {
     /// Number of pinnings after which a handle will collect some global garbage.
     const PINS_BETWEEN_COLLECT: usize = 128;
 
-    pub fn new(global: &Arc<Global>) -> Self {
+    pub(crate) fn new(global: &Arc<Global>) -> Self {
         let global = global.clone();
         let local_epoch = global.register();
 
@@ -308,7 +308,7 @@ mod tests {
     #[test]
     fn pin_reentrant() {
         let collector = Collector::new();
-        let handle = collector.add_handle();
+        let handle = collector.handle();
         drop(collector);
 
         assert!(!handle.is_pinned());
@@ -329,7 +329,7 @@ mod tests {
             .map(|_| {
                 scoped::scope(|scope| {
                     scope.spawn(|| for _ in 0..100_000 {
-                        let handle = collector.add_handle();
+                        let handle = collector.handle();
                         handle.pin(|scope| {
                             let before = collector.get_epoch();
                             collector.collect(scope);

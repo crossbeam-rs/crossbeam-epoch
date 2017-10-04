@@ -26,7 +26,7 @@ use sync::queue::Queue;
 ///
 /// let collector = epoch::Collector::new();
 ///
-/// let handle = collector.add_handle();
+/// let handle = collector.handle();
 /// handle.pin(|scope| {
 ///     scope.flush();
 /// });
@@ -50,7 +50,7 @@ impl Collector {
         Self { 0: Arc::new(Global::new()) }
     }
 
-    pub fn add_handle(&self) -> Handle {
+    pub fn handle(&self) -> Handle {
         Handle::new(&self.0)
     }
 }

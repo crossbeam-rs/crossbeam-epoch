@@ -14,7 +14,7 @@ lazy_static! {
 
 thread_local! {
     /// The thread-local handle for the default global data.
-    static HANDLE: Handle = COLLECTOR.add_handle();
+    static HANDLE: Handle = COLLECTOR.handle();
 }
 
 /// Pin the current thread.
