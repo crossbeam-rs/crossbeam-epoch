@@ -333,7 +333,7 @@ mod tests {
                 scoped::scope(|scope| {
                     scope.spawn(|| for _ in 0..100_000 {
                         let handle = collector.handle();
-                        handle.pin(|scope| {
+                        handle.pin(|_| {
                             let before = collector.get_epoch();
                             unsafe {
                                 collector.collect();
