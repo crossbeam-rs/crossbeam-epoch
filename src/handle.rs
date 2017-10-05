@@ -335,7 +335,9 @@ mod tests {
                         let handle = collector.handle();
                         handle.pin(|scope| {
                             let before = collector.get_epoch();
-                            collector.collect(scope);
+                            unsafe {
+                                collector.collect();
+                            }
                             let after = collector.get_epoch();
 
                             assert!(after.wrapping_sub(before) <= 2);

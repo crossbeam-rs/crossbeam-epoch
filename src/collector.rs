@@ -7,7 +7,6 @@
 //! when a handle is dropped, it is unregistered from the list.
 
 use std::cmp;
-use std::ops::Deref;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use handle::{Handle, LocalEpoch, Scope, unprotected};
@@ -46,20 +45,31 @@ pub struct Global {
 }
 
 impl Collector {
+    /// Create a collector.
     pub fn new() -> Self {
         Self { 0: Arc::new(Global::new()) }
     }
 
+    /// Create a new handle for the collector.
     pub fn handle(&self) -> Handle {
         Handle::new(&self.0)
     }
-}
 
-impl Deref for Collector {
-    type Target = Global;
+    /// Get the global epoch.
+    #[inline]
+    pub fn get_epoch(&self) -> usize {
+        self.0.get_epoch()
+    }
 
-    fn deref(&self) -> &Self::Target {
-        &self.0
+    /// Collect several bags from the global garbage queue and destroy their objects.
+    ///
+    /// # Safety
+    ///
+    /// It is assumed that no handles are concurrently accessing objects in the global garbage
+    /// queue. Otherwise, the behavior is undefined.
+    #[inline]
+    pub unsafe fn collect<'scope>(&'scope self) {
+        unprotected(|scope| self.0.collect(scope))
     }
 }
 
@@ -75,7 +85,6 @@ impl Global {
     /// Number of bags to destroy.
     const COLLECT_STEPS: usize = 8;
 
-    /// Get the global epoch.
     #[inline]
     pub fn get_epoch(&self) -> usize {
         self.epoch.load(Ordering::Relaxed)
