@@ -16,23 +16,6 @@ use sync::list::{List, Node};
 use sync::queue::Queue;
 
 
-/// A garbage collector.
-///
-/// # Examples
-///
-/// ```
-/// use crossbeam_epoch as epoch;
-///
-/// let collector = epoch::Collector::new();
-///
-/// let handle = collector.handle();
-/// handle.pin(|scope| {
-///     scope.flush();
-/// });
-/// ```
-#[derive(Debug)]
-pub struct Collector(Arc<Global>);
-
 /// The global data for a garbage collector.
 #[derive(Debug)]
 pub struct Global {
@@ -44,15 +27,14 @@ pub struct Global {
     epoch: Epoch,
 }
 
-impl Collector {
-    /// Create a collector.
-    pub fn new() -> Self {
-        Self { 0: Arc::new(Global::new()) }
-    }
+/// The garbage collector trait.
+pub trait Collector where Self: Clone {
+    fn global(&self) -> &Global;
 
     /// Create a new handle for the collector.
-    pub fn handle(&self) -> Handle {
-        Handle::new(&self.0)
+    #[inline]
+    fn handle(&self) -> Handle<Self> {
+        Handle::new(&self)
     }
 
     /// Collect several bags from the global garbage queue and destroy their objects.
@@ -62,8 +44,14 @@ impl Collector {
     /// It is assumed that no handles are concurrently accessing objects in the global garbage
     /// queue. Otherwise, the behavior is undefined.
     #[inline]
-    pub unsafe fn collect<'scope>(&'scope self) {
-        unprotected(|scope| self.0.collect(scope))
+    unsafe fn collect<'scope>(&'scope self) {
+        unprotected(|scope| self.global().collect(scope))
+    }
+}
+
+impl AsRef<Global> for Global {
+    fn as_ref(&self) -> &Global {
+        &self
     }
 }
 
@@ -71,7 +59,7 @@ impl Global {
     /// Number of bags to destroy.
     const COLLECT_STEPS: usize = 8;
 
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             registries: List::new(),
             garbages: Queue::new(),
@@ -130,17 +118,44 @@ impl Global {
     }
 }
 
+/// The static reference garbage collector.  See `default.rs` for an example.
+impl<G: AsRef<Global>> Collector for &'static G {
+    fn global(&self) -> &Global {
+        &self.as_ref()
+    }
+}
+
+/// The reference-counted garbage collector.
+///
+/// # Examples
+///
+/// ```
+/// use std::sync::Arc;
+/// use crossbeam_epoch::{self as epoch, Collector};
+///
+/// let collector = Arc::new(epoch::Global::new());
+///
+/// let handle = collector.handle();
+/// handle.pin(|scope| {
+///     scope.flush();
+/// });
+/// ```
+impl<G: AsRef<Global>> Collector for Arc<G> {
+    fn global(&self) -> &Global {
+        self.as_ref().as_ref()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crossbeam_utils::scoped;
-
     use super::*;
 
     const NUM_THREADS: usize = 8;
 
     #[test]
     fn pin_holds_advance() {
-        let collector = Collector::new();
+        let collector = Arc::new(Global::new());
 
         let threads = (0..NUM_THREADS)
             .map(|_| {
@@ -148,11 +163,11 @@ mod tests {
                     scope.spawn(|| for _ in 0..100_000 {
                         let handle = collector.handle();
                         handle.pin(|_| {
-                            let before = collector.0.get_epoch();
+                            let before = collector.global().get_epoch();
                             unsafe {
                                 collector.collect();
                             }
-                            let after = collector.0.get_epoch();
+                            let after = collector.global().get_epoch();
 
                             assert!(after.wrapping_sub(before) <= 2);
                         });

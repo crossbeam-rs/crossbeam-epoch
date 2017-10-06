@@ -99,15 +99,6 @@ impl<T> List<T> {
         Self::insert_internal(&self.head, data, scope)
     }
 
-    /// Inserts `data` after `to`.
-    pub fn insert_after<'scope>(
-        to: &'scope Node<T>,
-        data: T,
-        scope: Scope<'scope>,
-    ) -> Ptr<'scope, Node<T>> {
-        Self::insert_internal(&to.0.next, data, scope)
-    }
-
     /// Returns an iterator over all data.
     ///
     /// # Caveat

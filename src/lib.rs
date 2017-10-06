@@ -47,6 +47,6 @@ mod default;
 mod sync;
 
 pub use self::atomic::{Atomic, CompareAndSetOrdering, Owned, Ptr};
-pub use self::collector::Collector;
+pub use self::collector::{Global, Collector};
 pub use self::handle::{Handle, Scope, unprotected};
 pub use self::default::{pin, is_pinned};

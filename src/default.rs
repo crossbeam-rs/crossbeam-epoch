@@ -4,17 +4,17 @@
 //! registered in the default collector.  If initialized, the thread's handle will get destructed
 //! on thread exit, which in turn unregisters the thread.
 
-use collector::Collector;
+use collector::{Global, Collector};
 use handle::{Handle, Scope};
 
 lazy_static! {
     /// The default global data.
-    pub static ref COLLECTOR: Collector = Collector::new();
+    static ref COLLECTOR: Global = Global::new();
 }
 
 thread_local! {
     /// The thread-local handle for the default global data.
-    static HANDLE: Handle = COLLECTOR.handle();
+    static HANDLE: Handle<&'static Global> = COLLECTOR.as_ref().handle();
 }
 
 /// Pin the current thread.

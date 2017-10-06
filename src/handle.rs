@@ -10,14 +10,16 @@
 //! are necessary for performing atomic operations, and for freeing/dropping locations.
 
 use std::cell::{Cell, UnsafeCell};
+use std::ops::Deref;
+use std::ptr;
 use std::marker::PhantomData;
-use std::sync::Arc;
+use std::mem;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Relaxed, Release, SeqCst};
 
 use sync::list::Node;
 use garbage::{Garbage, Bag};
-use collector::Global;
+use collector::{Global, Collector};
 
 
 // FIXME(stjepang): Registries are stored in a linked list because linked lists are fairly easy to
@@ -25,15 +27,13 @@ use collector::Global;
 // dependencies. We should experiment with other data structures as well.
 /// Reference to a garbage collector
 #[derive(Debug)]
-pub struct Handle {
-    /// A reference to the global data.
-    global: Arc<Global>,
+pub struct Handle<C: Collector> {
+    /// A reference to the collector.
+    collector: C,
     /// The local garbage objects that will be later freed.
     bag: UnsafeCell<Bag>,
-    /// This handle's entry in the local epoch list.
-    ///
-    /// It points to a node in `global`, so it is live as far as the handle has a counted reference
-    /// to `global`.
+    /// This handle's entry in the local epoch list.  It points to a node in `global`, so it is live
+    /// as far as the handle has a counted reference to `global`.
     local_epoch: *const Node<LocalEpoch>,
     /// Whether the handle is currently pinned.
     is_pinned: Cell<bool>,
@@ -61,25 +61,43 @@ pub struct LocalEpoch {
 /// [`Atomic`]: struct.Atomic.html
 #[derive(Clone, Copy, Debug)]
 pub struct Scope<'scope> {
-    /// A reference to the handle.
-    handle: Option<&'scope Handle>,
+    /// A reference to the global data.
+    global: *const Global,
+    /// A reference to the local data.
+    bag: *mut Bag, // !Send + !Sync
     /// !Send + !Sync
-    _marker: PhantomData<*mut u8>,
+    _marker: PhantomData<&'scope Global>,
 }
 
+impl<C: Collector> Clone for Handle<C> {
+    fn clone(&self) -> Self {
+        Self::new(&self.collector)
+    }
+}
 
-impl Handle {
+impl<C: Collector> Deref for Handle<C> {
+    type Target = C;
+
+    fn deref(&self) -> &Self::Target {
+        &self.collector
+    }
+}
+
+impl<C: Collector> Collector for Handle<C> {
+    fn global(&self) -> &Global {
+        self.collector.global()
+    }
+}
+
+impl<C: Collector> Handle<C> {
     /// Number of pinnings after which a handle will collect some global garbage.
     const PINS_BETWEEN_COLLECT: usize = 128;
 
-    pub(crate) fn new(global: &Arc<Global>) -> Self {
-        let global = global.clone();
-        let local_epoch = global.register();
-
+    pub(crate) fn new(collector: &C) -> Self {
         Handle {
-            global,
+            collector: collector.clone(),
             bag: UnsafeCell::new(Bag::new()),
-            local_epoch,
+            local_epoch: collector.global().register(),
             is_pinned: Cell::new(false),
             pin_count: Cell::new(0),
         }
@@ -109,7 +127,8 @@ impl Handle {
     {
         let local_epoch = unsafe { (*self.local_epoch).get() };
         let scope = Scope {
-            handle: Some(self),
+            global: self.collector.global(),
+            bag: self.bag.get(),
             _marker: PhantomData,
         };
 
@@ -121,12 +140,12 @@ impl Handle {
 
             // Pin the handle.
             self.is_pinned.set(true);
-            let epoch = self.global.get_epoch();
+            let epoch = self.collector.global().get_epoch();
             local_epoch.set_pinned(epoch);
 
             // If the counter progressed enough, try advancing the epoch and collecting garbage.
             if count % Self::PINS_BETWEEN_COLLECT == 0 {
-                self.global.collect(scope);
+                self.collector.global().collect(scope);
             }
         }
 
@@ -148,20 +167,14 @@ impl Handle {
     }
 }
 
-impl Clone for Handle {
-    fn clone(&self) -> Self {
-        Self::new(&self.global)
-    }
-}
-
-impl Drop for Handle {
+impl<C: Collector> Drop for Handle<C> {
     fn drop(&mut self) {
         // Now that the handle is exiting, we must move the local bag into the global garbage
         // queue. Also, let's try advancing the epoch and help free some garbage.
 
         self.pin(|scope| {
             // Spare some cycles on garbage collection.
-            self.global.collect(scope);
+            self.collector.global().collect(scope);
 
             // Unregister the handle by marking this entry as deleted.
             unsafe {
@@ -170,7 +183,7 @@ impl Drop for Handle {
 
             // Push the local bag into the global garbage queue.
             unsafe {
-                self.global.push_bag(&mut *self.bag.get(), scope);
+                self.collector.global().push_bag(&mut *self.bag.get(), scope);
             }
         });
     }
@@ -196,7 +209,8 @@ where
     F: for<'scope> FnOnce(Scope<'scope>) -> R,
 {
     let scope = Scope {
-        handle: None,
+        global: ptr::null(),
+        bag: mem::uninitialized(),
         _marker: PhantomData,
     };
     f(scope)
@@ -251,10 +265,10 @@ impl LocalEpoch {
 
 impl<'scope> Scope<'scope> {
     unsafe fn defer_garbage(self, mut garbage: Garbage) {
-        self.handle.map(|handle| {
-            let bag = &mut *handle.bag.get();
+        self.global.as_ref().map(|global| {
+            let bag = &mut *self.bag;
             while let Err(g) = bag.try_push(garbage) {
-                handle.global.push_bag(bag, self);
+                global.push_bag(bag, self);
                 garbage = g;
             }
         });
@@ -286,14 +300,14 @@ impl<'scope> Scope<'scope> {
     /// [`defer_free`]: fn.defer_free.html [`defer_drop`]: fn.defer_drop.html
     pub fn flush(self) {
         unsafe {
-            self.handle.map(|handle| {
-                let bag = &mut *handle.bag.get();
+            self.global.as_ref().map(|global| {
+                let bag = &mut *self.bag;
 
                 if !bag.is_empty() {
-                    handle.global.push_bag(bag, self);
+                    global.push_bag(bag, self);
                 }
 
-                handle.global.collect(self);
+                global.collect(self);
             });
         }
     }
@@ -302,11 +316,12 @@ impl<'scope> Scope<'scope> {
 
 #[cfg(test)]
 mod tests {
-    use Collector;
+    use std::sync::Arc;
+    use {Global, Collector};
 
     #[test]
     fn pin_reentrant() {
-        let collector = Collector::new();
+        let collector = Arc::new(Global::new());
         let handle = collector.handle();
         drop(collector);
 
