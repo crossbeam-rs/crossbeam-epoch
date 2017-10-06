@@ -302,11 +302,7 @@ impl<'scope> Scope<'scope> {
 
 #[cfg(test)]
 mod tests {
-    use crossbeam_utils::scoped;
-
     use Collector;
-
-    const NUM_THREADS: usize = 8;
 
     #[test]
     fn pin_reentrant() {
@@ -322,34 +318,5 @@ mod tests {
             assert!(handle.is_pinned());
         });
         assert!(!handle.is_pinned());
-    }
-
-    #[test]
-    fn pin_holds_advance() {
-        let collector = Collector::new();
-
-        let threads = (0..NUM_THREADS)
-            .map(|_| {
-                scoped::scope(|scope| {
-                    scope.spawn(|| for _ in 0..100_000 {
-                        let handle = collector.handle();
-                        handle.pin(|_| {
-                            let before = collector.get_epoch();
-                            unsafe {
-                                collector.collect();
-                            }
-                            let after = collector.get_epoch();
-
-                            assert!(after.wrapping_sub(before) <= 2);
-                        });
-                    })
-                })
-            })
-            .collect::<Vec<_>>();
-        drop(collector);
-
-        for t in threads {
-            t.join();
-        }
     }
 }
