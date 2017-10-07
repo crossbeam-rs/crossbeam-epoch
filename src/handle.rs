@@ -93,7 +93,7 @@ impl<C: Collector> Handle<C> {
     /// Number of pinnings after which a handle will collect some global garbage.
     const PINS_BETWEEN_COLLECT: usize = 128;
 
-    pub(crate) fn new(collector: &C) -> Self {
+    pub fn new(collector: &C) -> Self {
         Handle {
             collector: collector.clone(),
             bag: UnsafeCell::new(Bag::new()),
@@ -317,12 +317,12 @@ impl<'scope> Scope<'scope> {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
-    use {Global, Collector};
+    use {Global, Handle};
 
     #[test]
     fn pin_reentrant() {
         let collector = Arc::new(Global::new());
-        let handle = collector.handle();
+        let handle = Handle::new(&collector);
         drop(collector);
 
         assert!(!handle.is_pinned());

@@ -9,7 +9,7 @@
 use std::cmp;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use handle::{Handle, LocalEpoch, Scope, unprotected};
+use handle::{LocalEpoch, Scope, unprotected};
 use garbage::Bag;
 use epoch::Epoch;
 use sync::list::{List, Node};
@@ -28,14 +28,8 @@ pub struct Global {
 }
 
 /// The garbage collector trait.
-pub trait Collector where Self: Clone {
+pub trait Collector: Clone {
     fn global(&self) -> &Global;
-
-    /// Create a new handle for the collector.
-    #[inline]
-    fn handle(&self) -> Handle<Self> {
-        Handle::new(&self)
-    }
 
     /// Collect several bags from the global garbage queue and destroy their objects.
     ///
@@ -131,11 +125,11 @@ impl<G: AsRef<Global>> Collector for &'static G {
 ///
 /// ```
 /// use std::sync::Arc;
-/// use crossbeam_epoch::{self as epoch, Collector};
+/// use crossbeam_epoch::{self as epoch, Collector, Handle};
 ///
 /// let collector = Arc::new(epoch::Global::new());
 ///
-/// let handle = collector.handle();
+/// let handle = Handle::new(&collector);
 /// handle.pin(|scope| {
 ///     scope.flush();
 /// });
@@ -148,8 +142,9 @@ impl<G: AsRef<Global>> Collector for Arc<G> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
     use crossbeam_utils::scoped;
-    use super::*;
+    use {Global, Collector, Handle};
 
     const NUM_THREADS: usize = 8;
 
@@ -161,7 +156,7 @@ mod tests {
             .map(|_| {
                 scoped::scope(|scope| {
                     scope.spawn(|| for _ in 0..100_000 {
-                        let handle = collector.handle();
+                        let handle = Handle::new(&collector);
                         handle.pin(|_| {
                             let before = collector.global().get_epoch();
                             unsafe {
