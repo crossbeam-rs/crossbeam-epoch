@@ -60,6 +60,6 @@ mod sync;
 
 pub use self::atomic::{Atomic, CompareAndSetOrdering, Owned, Ptr};
 pub use self::scope::{Scope, unprotected};
-pub use self::internal::{Global, Participant};
+pub use self::internal::{Global, Local};
 pub use self::default::{pin, is_pinned};
 pub use self::collector::{Collector, Handle};

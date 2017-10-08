@@ -18,16 +18,16 @@
 //!
 //! # Example
 //!
-//! `Global` is the global data for a garbage collector, and `Participant` is a participant of a
-//! garbage collector. Use `Global` and `Participant` when you want to embed a garbage collector in
-//! another systems library, e.g. memory allocator or thread manager.
+//! `Global` is the global data for a garbage collector, and `Local` is a participant of a garbage
+//! collector. Use `Global` and `Local` when you want to embed a garbage collector in another
+//! systems library, e.g. memory allocator or thread manager.
 //!
 //! ```
-//! use crossbeam_epoch::{Global, Participant};
+//! use crossbeam_epoch::{Global, Local};
 //!
 //! let global = Global::new();
-//! let participant = Participant::new(&global);
-//! participant.pin(&global, |scope| {
+//! let local = Local::new(&global);
+//! local.pin(&global, |scope| {
 //!     scope.flush();
 //! });
 //! ```
@@ -114,7 +114,7 @@ impl Global {
 // dependencies. We should experiment with other data structures as well.
 /// Participant for garbage collection
 #[derive(Debug)]
-pub struct Participant {
+pub struct Local {
     /// The local garbage objects that will be later freed.
     bag: UnsafeCell<Bag>,
     /// This participant's entry in the local epoch list.  It points to a node in `Global`, so it is
@@ -134,7 +134,7 @@ pub struct LocalEpoch {
     state: AtomicUsize,
 }
 
-impl Participant {
+impl Local {
     /// Number of pinnings after which a participant will collect some global garbage.
     const PINS_BETWEEN_COLLECT: usize = 128;
 
@@ -221,7 +221,7 @@ impl Participant {
     }
 
     /// Dettaches itself from the garbage collector.
-    pub fn finalize(&self, global: &Global) {
+    pub unsafe fn finalize(&self, global: &Global) {
         // Now that the participant is exiting, we must move the local bag into the global garbage
         // queue. Also, let's try advancing the epoch and help free some garbage.
 
@@ -230,14 +230,10 @@ impl Participant {
             global.collect(scope);
 
             // Unregister the participant by marking this entry as deleted.
-            unsafe {
-                (*self.local_epoch).delete(scope);
-            }
+            (*self.local_epoch).delete(scope);
 
             // Push the local bag into the global garbage queue.
-            unsafe {
-                global.push_bag(&mut *self.bag.get(), scope);
-            }
+            global.push_bag(&mut *self.bag.get(), scope);
         });
     }
 }
@@ -294,51 +290,50 @@ impl LocalEpoch {
 
 #[cfg(test)]
 mod tests {
-    // use crossbeam_utils::scoped; 
-    use {Global, Participant};
+    use crossbeam_utils::scoped; 
+    use {Global, Local};
 
-    // const NUM_THREADS: usize = 8;
+    const NUM_THREADS: usize = 8;
 
-    // FIXME(jeehoonkang): this doesn't terminate.
-    //
-    // #[test]
-    // fn pin_holds_advance() {
-    //     let global = Global::new();
+    #[test]
+    fn pin_holds_advance() {
+        let global = Global::new();
 
-    //     let threads = (0..NUM_THREADS)
-    //         .map(|_| {
-    //             scoped::scope(|scope| {
-    //                 scope.spawn(|| for _ in 0..100_000 {
-    //                     let participant = Participant::new(&global);
-    //                     participant.pin(&global, |scope| {
-    //                         let before = global.get_epoch();
-    //                         global.collect(scope);
-    //                         let after = global.get_epoch();
+        let threads = (0..NUM_THREADS)
+            .map(|_| {
+                scoped::scope(|scope| {
+                    scope.spawn(|| for _ in 0..100_000 {
+                        let local = Local::new(&global);
+                        local.pin(&global, |scope| {
+                            let before = global.get_epoch();
+                            global.collect(scope);
+                            let after = global.get_epoch();
 
-    //                         assert!(after.wrapping_sub(before) <= 2);
-    //                     });
-    //                 })
-    //             })
-    //         })
-    //         .collect::<Vec<_>>();
+                            assert!(after.wrapping_sub(before) <= 2);
+                        });
+                        unsafe { local.finalize(&global); }
+                    })
+                })
+            })
+            .collect::<Vec<_>>();
 
-    //     for t in threads {
-    //         t.join();
-    //     }
-    // }
+        for t in threads {
+            t.join();
+        }
+    }
 
     #[test]
     fn pin_reentrant() {
         let global = Global::new();
-        let participant = Participant::new(&global);
+        let local = Local::new(&global);
 
-        assert!(!participant.is_pinned());
-        participant.pin(&global, |_| {
-            participant.pin(&global, |_| {
-                assert!(participant.is_pinned());
+        assert!(!local.is_pinned());
+        local.pin(&global, |_| {
+            local.pin(&global, |_| {
+                assert!(local.is_pinned());
             });
-            assert!(participant.is_pinned());
+            assert!(local.is_pinned());
         });
-        assert!(!participant.is_pinned());
+        assert!(!local.is_pinned());
     }
 }

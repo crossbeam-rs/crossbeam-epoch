@@ -16,7 +16,7 @@
 /// ```
 
 use std::sync::Arc;
-use internal::{Global, Participant};
+use internal::{Global, Local};
 use scope::{Scope, unprotected};
 
 /// General-purpose garbage collector.
@@ -25,7 +25,7 @@ pub struct Collector(Arc<Global>);
 /// A handle to a garbage collector.
 pub struct Handle {
     global: Arc<Global>,
-    participant: Participant,
+    local: Local,
 }
 
 impl Collector {
@@ -54,8 +54,8 @@ impl Collector {
 
 impl Handle {
     fn new(global: Arc<Global>) -> Self {
-        let participant = Participant::new(&global);
-        Self { global, participant }
+        let local = Local::new(&global);
+        Self { global, local }
     }
 
     /// Pin the current handle.
@@ -64,12 +64,12 @@ impl Handle {
         where
         F: for<'scope> FnOnce(Scope<'scope>) -> R,
     {
-        self.participant.pin(&self.global, f)
+        self.local.pin(&self.global, f)
     }
 
     /// Check if the current handle is pinned.
     #[inline]
     pub fn is_pinned(&self) -> bool {
-        self.participant.is_pinned()
+        self.local.is_pinned()
     }
 }
