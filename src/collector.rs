@@ -64,12 +64,18 @@ impl Handle {
         where
         F: for<'scope> FnOnce(Scope<'scope>) -> R,
     {
-        self.local.pin(&self.global, f)
+        unsafe { self.local.pin(&self.global, f) }
     }
 
     /// Check if the current handle is pinned.
     #[inline]
     pub fn is_pinned(&self) -> bool {
         self.local.is_pinned()
+    }
+}
+
+impl Drop for Handle {
+    fn drop(&mut self) {
+        unsafe { self.local.unregister(&self.global) }
     }
 }

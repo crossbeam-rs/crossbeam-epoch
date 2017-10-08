@@ -37,7 +37,7 @@ impl Deref for Handle {
 
 impl Drop for Handle {
     fn drop(&mut self) {
-        unsafe { self.0.finalize(&GLOBAL) }
+        unsafe { self.0.unregister(&GLOBAL) }
     }
 }
 
@@ -48,7 +48,7 @@ where
 {
     // FIXME(jeehoonkang): thread-local storage may be destructed at the time `pin()` is called. For
     // that case, we should use `HANDLE.try_with()` instead.
-    HANDLE.with(|handle| handle.pin(&GLOBAL, f))
+    HANDLE.with(|handle| unsafe { handle.pin(&GLOBAL, f) })
 }
 
 /// Check if the current thread is pinned.

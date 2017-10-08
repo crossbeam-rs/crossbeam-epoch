@@ -173,12 +173,17 @@ impl Local {
     /// atomic operations. However, this mechanism is designed to be as performant as possible, so
     /// it can be used pretty liberally. On a modern machine pinning takes 10 to 15 nanoseconds.
     ///
+    /// # Safety
+    ///
+    /// You should pass `global` that is used to create this `Local`. Otherwise, the behavior is
+    /// undefined.
+    ///
     /// [`Atomic`]: struct.Atomic.html
-    pub fn pin<F, R>(&self, global: &Global, f: F) -> R
+    pub unsafe fn pin<F, R>(&self, global: &Global, f: F) -> R
     where
         F: for<'scope> FnOnce(Scope<'scope>) -> R,
     {
-        let local_epoch = unsafe { (*self.local_epoch).get() };
+        let local_epoch = (*self.local_epoch).get();
         let scope = Scope {
             global,
             bag: self.bag.get(),
@@ -221,7 +226,13 @@ impl Local {
     }
 
     /// Dettaches itself from the garbage collector.
-    pub unsafe fn finalize(&self, global: &Global) {
+    ///
+    /// # Safety
+    ///
+    /// You should pass `global` that is used to create this `Local`. Also, a `Local` should be
+    /// unregistered once, and after it is unregistered it should not be `pin()`ned. Otherwise, the
+    /// behavior is undefined.
+    pub unsafe fn unregister(&self, global: &Global) {
         // Now that the participant is exiting, we must move the local bag into the global garbage
         // queue. Also, let's try advancing the epoch and help free some garbage.
 
@@ -302,16 +313,18 @@ mod tests {
         let threads = (0..NUM_THREADS)
             .map(|_| {
                 scoped::scope(|scope| {
-                    scope.spawn(|| for _ in 0..100_000 {
-                        let local = Local::new(&global);
-                        local.pin(&global, |scope| {
-                            let before = global.get_epoch();
-                            global.collect(scope);
-                            let after = global.get_epoch();
+                    scope.spawn(|| unsafe {
+                        for _ in 0..100_000 {
+                            let local = Local::new(&global);
+                            local.pin(&global, |scope| {
+                                let before = global.get_epoch();
+                                global.collect(scope);
+                                let after = global.get_epoch();
 
-                            assert!(after.wrapping_sub(before) <= 2);
-                        });
-                        unsafe { local.finalize(&global); }
+                                assert!(after.wrapping_sub(before) <= 2);
+                            });
+                            local.unregister(&global);
+                        }
                     })
                 })
             })
@@ -328,12 +341,14 @@ mod tests {
         let local = Local::new(&global);
 
         assert!(!local.is_pinned());
-        local.pin(&global, |_| {
+        unsafe {
             local.pin(&global, |_| {
+                local.pin(&global, |_| {
+                    assert!(local.is_pinned());
+                });
                 assert!(local.is_pinned());
             });
-            assert!(local.is_pinned());
-        });
+        }
         assert!(!local.is_pinned());
     }
 }
