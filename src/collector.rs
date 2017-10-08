@@ -61,8 +61,8 @@ impl Handle {
     /// Pin the current handle.
     #[inline]
     pub fn pin<F, R>(&self, f: F) -> R
-        where
-        F: for<'scope> FnOnce(Scope<'scope>) -> R,
+    where
+        F: FnOnce(&Scope) -> R,
     {
         unsafe { self.local.pin(&self.global, f) }
     }

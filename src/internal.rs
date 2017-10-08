@@ -34,7 +34,6 @@
 
 use std::cell::{Cell, UnsafeCell};
 use std::cmp;
-use std::marker::PhantomData;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use scope::{Scope, unprotected};
 use garbage::Bag;
@@ -75,7 +74,7 @@ impl Global {
     }
 
     /// Pushes the bag onto the global queue and replaces the bag with a new empty bag.
-    pub(crate) fn push_bag<'scope>(&self, bag: &mut Bag, scope: Scope<'scope>) {
+    pub(crate) fn push_bag<'scope>(&'scope self, bag: &mut Bag, scope: &'scope Scope) {
         let epoch = self.epoch.load(Ordering::Relaxed);
         let bag = ::std::mem::replace(bag, Bag::new());
         ::std::sync::atomic::fence(Ordering::SeqCst);
@@ -90,7 +89,7 @@ impl Global {
     /// path. In other words, we want the compiler to optimize branching for the case when
     /// `collect()` is not called.
     #[cold]
-    pub(crate) fn collect<'scope>(&'scope self, scope: Scope<'scope>) {
+    pub(crate) fn collect<'scope>(&'scope self, scope: &'scope Scope) {
         let epoch = self.epoch.try_advance(&self.registries, scope);
 
         let condition = |bag: &(usize, Bag)| {
@@ -181,13 +180,12 @@ impl Local {
     /// [`Atomic`]: struct.Atomic.html
     pub unsafe fn pin<F, R>(&self, global: &Global, f: F) -> R
     where
-        F: for<'scope> FnOnce(Scope<'scope>) -> R,
+        F: FnOnce(&Scope) -> R,
     {
         let local_epoch = (*self.local_epoch).get();
         let scope = Scope {
             global,
             bag: self.bag.get(),
-            _marker: PhantomData,
         };
 
         let was_pinned = self.is_pinned.get();
@@ -203,7 +201,7 @@ impl Local {
 
             // If the counter progressed enough, try advancing the epoch and collecting garbage.
             if count % Self::PINS_BETWEEN_COLLECT == 0 {
-                global.collect(scope);
+                global.collect(&scope);
             }
         }
 
@@ -216,7 +214,7 @@ impl Local {
             }
         }
 
-        f(scope)
+        f(&scope)
     }
 
     /// Returns `true` if the current participant is pinned.

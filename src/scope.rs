@@ -1,4 +1,3 @@
-use std::marker::PhantomData;
 use std::mem;
 use std::ptr;
 
@@ -7,26 +6,24 @@ use internal::Global;
 
 /// A witness that the current participant is pinned.
 ///
-/// A `Scope` is a witness that the current participant is pinned. Lots of methods that interact
+/// A `&Scope` is a witness that the current participant is pinned. Lots of methods that interact
 /// with [`Atomic`]s can safely be called only while the participant is pinned so they often require
-/// a `Scope`.
+/// a `&Scope`.
 ///
 /// This data type is inherently bound to the thread that created it, therefore it does not
 /// implement `Send` nor `Sync`.
 ///
 /// [`Atomic`]: struct.Atomic.html
-#[derive(Clone, Copy, Debug)]
-pub struct Scope<'scope> {
+#[derive(Debug)]
+pub struct Scope {
     /// A reference to the global data.
     pub(crate) global: *const Global,
     /// A reference to the thread-local bag.
     pub(crate) bag: *mut Bag, // !Send + !Sync
-    /// `global` is effectivey `&'scope Global`
-    pub(crate) _marker: PhantomData<&'scope Global>,
 }
 
-impl<'scope> Scope<'scope> {
-    unsafe fn defer_garbage(self, mut garbage: Garbage) {
+impl Scope {
+    unsafe fn defer_garbage(&self, mut garbage: Garbage) {
         self.global.as_ref().map(|global| {
             let bag = &mut *self.bag;
             while let Err(g) = bag.try_push(garbage) {
@@ -47,7 +44,7 @@ impl<'scope> Scope<'scope> {
     ///
     /// [`Bag`]: struct.Bag.html
     /// [`flush`]: fn.flush.html
-    pub unsafe fn defer<R, F: FnOnce() -> R + Send>(self, f: F) {
+    pub unsafe fn defer<R, F: FnOnce() -> R + Send>(&self, f: F) {
         self.defer_garbage(Garbage::new(|| drop(f())))
     }
 
@@ -62,16 +59,16 @@ impl<'scope> Scope<'scope> {
     /// [`defer_drop`], so that it isn't sitting in the thread-local bag for a long time.
     ///
     /// [`defer_free`]: fn.defer_free.html [`defer_drop`]: fn.defer_drop.html
-    pub fn flush(self) {
+    pub fn flush(&self) {
         unsafe {
             self.global.as_ref().map(|global| {
                 let bag = &mut *self.bag;
 
                 if !bag.is_empty() {
-                    global.push_bag(bag, self);
+                    global.push_bag(bag, &self);
                 }
 
-                global.collect(self);
+                global.collect(&self);
             });
         }
     }
@@ -94,12 +91,11 @@ impl<'scope> Scope<'scope> {
 #[inline]
 pub unsafe fn unprotected<F, R>(f: F) -> R
 where
-    F: for<'scope> FnOnce(Scope<'scope>) -> R,
+    F: FnOnce(&Scope) -> R,
 {
     let scope = Scope {
         global: ptr::null(),
         bag: mem::uninitialized(),
-        _marker: PhantomData,
     };
-    f(scope)
+    f(&scope)
 }

@@ -39,7 +39,7 @@ impl Epoch {
     pub fn try_advance<'scope>(
         &'scope self,
         registries: &'scope List<LocalEpoch>,
-        scope: Scope<'scope>,
+        scope: &'scope Scope,
     ) -> usize {
         let epoch = self.epoch.load(Relaxed);
         ::std::sync::atomic::fence(SeqCst);
