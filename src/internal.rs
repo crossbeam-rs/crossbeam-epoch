@@ -27,9 +27,11 @@
 //!
 //! let global = Global::new();
 //! let local = Local::new(&global);
-//! local.pin(&global, |scope| {
-//!     scope.flush();
-//! });
+//! unsafe {
+//!     local.pin(&global, |scope| {
+//!         scope.flush();
+//!     });
+//! }
 //! ```
 
 use std::cell::{Cell, UnsafeCell};
