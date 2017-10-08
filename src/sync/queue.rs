@@ -206,7 +206,7 @@ impl<T> Drop for Queue<T> {
 mod test {
     use super::*;
     use crossbeam_utils::scoped;
-    use {pin};
+    use pin;
 
     struct Queue<T> {
         queue: super::Queue<T>,

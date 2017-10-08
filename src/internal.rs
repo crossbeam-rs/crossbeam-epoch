@@ -299,7 +299,7 @@ impl LocalEpoch {
 
 #[cfg(test)]
 mod tests {
-    use crossbeam_utils::scoped; 
+    use crossbeam_utils::scoped;
     use {Global, Local};
 
     const NUM_THREADS: usize = 8;

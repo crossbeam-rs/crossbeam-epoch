@@ -268,7 +268,12 @@ impl<T> Atomic<T> {
     ///     let p = a.swap(Ptr::null(), SeqCst, scope);
     /// });
     /// ```
-    pub fn swap<'scope>(&'scope self, new: Ptr<T>, ord: Ordering, _: &'scope Scope) -> Ptr<'scope, T> {
+    pub fn swap<'scope>(
+        &'scope self,
+        new: Ptr<T>,
+        ord: Ordering,
+        _: &'scope Scope,
+    ) -> Ptr<'scope, T> {
         Ptr::from_data(self.data.swap(new.data, ord))
     }
 
@@ -503,7 +508,12 @@ impl<T> Atomic<T> {
     ///     assert_eq!(a.load(SeqCst, scope).tag(), 2);
     /// });
     /// ```
-    pub fn fetch_and<'scope>(&'scope self, val: usize, ord: Ordering, _: &'scope Scope) -> Ptr<'scope, T> {
+    pub fn fetch_and<'scope>(
+        &'scope self,
+        val: usize,
+        ord: Ordering,
+        _: &'scope Scope,
+    ) -> Ptr<'scope, T> {
         Ptr::from_data(self.data.fetch_and(val | !low_bits::<T>(), ord))
     }
 
@@ -529,7 +539,12 @@ impl<T> Atomic<T> {
     ///     assert_eq!(a.load(SeqCst, scope).tag(), 3);
     /// });
     /// ```
-    pub fn fetch_or<'scope>(&'scope self, val: usize, ord: Ordering, _: &'scope Scope) -> Ptr<'scope, T> {
+    pub fn fetch_or<'scope>(
+        &'scope self,
+        val: usize,
+        ord: Ordering,
+        _: &'scope Scope,
+    ) -> Ptr<'scope, T> {
         Ptr::from_data(self.data.fetch_or(val & low_bits::<T>(), ord))
     }
 
@@ -555,7 +570,12 @@ impl<T> Atomic<T> {
     ///     assert_eq!(a.load(SeqCst, scope).tag(), 2);
     /// });
     /// ```
-    pub fn fetch_xor<'scope>(&'scope self, val: usize, ord: Ordering, _: &'scope Scope) -> Ptr<'scope, T> {
+    pub fn fetch_xor<'scope>(
+        &'scope self,
+        val: usize,
+        ord: Ordering,
+        _: &'scope Scope,
+    ) -> Ptr<'scope, T> {
         Ptr::from_data(self.data.fetch_xor(val & low_bits::<T>(), ord))
     }
 }
