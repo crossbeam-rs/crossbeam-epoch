@@ -22,9 +22,7 @@
 //! collector. Use `Global` and `Local` when you want to embed a garbage collector in another
 //! systems library, e.g. memory allocator or thread manager.
 //!
-//! ```
-//! use crossbeam_epoch::{Global, Local};
-//!
+//! ```ignore
 //! let global = Global::new();
 //! let local = Local::new(&global);
 //! unsafe {
@@ -302,7 +300,7 @@ impl LocalEpoch {
 #[cfg(test)]
 mod tests {
     use crossbeam_utils::scoped;
-    use {Global, Local};
+    use super::{Global, Local};
 
     const NUM_THREADS: usize = 8;
 
