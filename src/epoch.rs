@@ -56,8 +56,8 @@ impl Epoch {
                     let local_epoch = local_epoch.get();
                     let (participant_is_pinned, participant_epoch) = local_epoch.get_state();
 
-                    // If the participant was pinned in a different epoch, we cannot advance the global
-                    // epoch just yet.
+                    // If the participant was pinned in a different epoch, we cannot advance the
+                    // global epoch just yet.
                     if participant_is_pinned && participant_epoch != epoch {
                         return epoch;
                     }
