@@ -16,18 +16,18 @@ lazy_static! {
 
 thread_local! {
     /// The per-thread participant for the default garbage collector.
-    static HANDLE: Handle = Handle::new();
+    static HANDLE: DefaultHandle = DefaultHandle::new();
 }
 
-struct Handle(Local);
+struct DefaultHandle(Local);
 
-impl Handle {
+impl DefaultHandle {
     fn new() -> Self {
         Self { 0: Local::new(&GLOBAL) }
     }
 }
 
-impl Deref for Handle {
+impl Deref for DefaultHandle {
     type Target = Local;
 
     fn deref(&self) -> &Self::Target {
@@ -35,7 +35,7 @@ impl Deref for Handle {
     }
 }
 
-impl Drop for Handle {
+impl Drop for DefaultHandle {
     fn drop(&mut self) {
         unsafe { self.0.unregister(&GLOBAL) }
     }
