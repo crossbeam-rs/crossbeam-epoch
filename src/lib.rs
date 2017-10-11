@@ -25,14 +25,10 @@
 //! # APIs
 //!
 //! For majority of use cases, just use the default garbage collector by invoking [`pin`]. If you
-//! want to create your own garbage collector, use the [`Collector`] API. When you want to embed a
-//! garbage collector in another systems library, e.g. memory allocator or thread manager, use the
-//! internal API (see [`Global`] and [`Participant`]).
+//! want to create your own garbage collector, use the [`Collector`] API.
 //!
 //! [`Atomic`]: struct.Atomic.html
 //! [`Collector`]: struct.Collector.html
-//! [`Global`]: struct.Global.html
-//! [`Participant`]: struct.Participant.html
 //! [`Ptr`]: struct.Ptr.html
 //! [`pin`]: fn.pin.html
 //! [`defer_free`]: fn.defer_free.html

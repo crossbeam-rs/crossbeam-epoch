@@ -1,4 +1,4 @@
-/// General-purpose garbage collector.
+/// Epoch-based garbage collector.
 ///
 /// # Examples
 ///

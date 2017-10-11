@@ -61,7 +61,7 @@ impl<T> Node<T> {
 
 impl<T: 'static> Node<T> {
     /// Marks this entry as deleted.
-    pub fn delete<'scope>(&'scope self, scope: &'scope Scope) {
+    pub fn delete(&self, scope: &Scope) {
         self.0.next.fetch_or(1, Release, scope);
     }
 }

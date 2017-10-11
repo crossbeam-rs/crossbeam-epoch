@@ -65,12 +65,7 @@ impl<T> Queue<T> {
     /// Attempts to atomically place `n` into the `next` pointer of `onto`, and returns `true` on
     /// success. The queue's `tail` pointer may be updated.
     #[inline(always)]
-    fn push_internal<'scope>(
-        &'scope self,
-        onto: Ptr<Node<T>>,
-        new: Ptr<Node<T>>,
-        scope: &'scope Scope,
-    ) -> bool {
+    fn push_internal(&self, onto: Ptr<Node<T>>, new: Ptr<Node<T>>, scope: &Scope) -> bool {
         // is `onto` the actual tail?
         let o = unsafe { onto.deref() };
         let next = o.next.load(Acquire, scope);

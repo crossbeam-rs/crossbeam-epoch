@@ -223,7 +223,7 @@ impl Local {
         self.is_pinned.get()
     }
 
-    /// Dettaches itself from the garbage collector.
+    /// Unregisters itself from the garbage collector.
     ///
     /// # Safety
     ///

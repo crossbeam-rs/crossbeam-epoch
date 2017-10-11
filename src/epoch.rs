@@ -36,17 +36,13 @@ impl Epoch {
     ///
     /// `try_advance()` is annotated `#[cold]` because it is rarely called.
     #[cold]
-    pub fn try_advance<'scope>(
-        &'scope self,
-        registries: &'scope List<LocalEpoch>,
-        scope: &'scope Scope,
-    ) -> usize {
+    pub fn try_advance(&self, registries: &List<LocalEpoch>, scope: &Scope) -> usize {
         let epoch = self.epoch.load(Relaxed);
         ::std::sync::atomic::fence(SeqCst);
 
         // Traverse the linked list of participant registries.
-        for registry in registries.iter(scope) {
-            match registry {
+        for participant in registries.iter(scope) {
+            match participant {
                 Err(IterError::LostRace) => {
                     // We leave the job to the participant that won the race, which continues to
                     // iterate the registries and tries to advance to epoch.
