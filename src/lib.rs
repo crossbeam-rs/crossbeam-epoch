@@ -19,8 +19,9 @@
 //! pinned participants get unpinned. Such objects can be stored into a [`Garbage`], where they are
 //! kept until the right time for their destruction comes.
 //!
-//! There is a global shared instance of garbage queue, which can deallocate ([`defer_free`]) or
-//! drop ([`defer_drop`]) objects, or even run arbitrary destruction procedures ([`defer`]).
+//! There is a global shared instance of garbage queue. You can [`defer`] the execution of an
+//! arbitrary function until the global epoch is advanced enough. Most notably, concurrent data
+//! structures may defer the deallocation of an object.
 //!
 //! # APIs
 //!
@@ -31,8 +32,6 @@
 //! [`Collector`]: struct.Collector.html
 //! [`Ptr`]: struct.Ptr.html
 //! [`pin`]: fn.pin.html
-//! [`defer_free`]: fn.defer_free.html
-//! [`defer_drop`]: fn.defer_drop.html
 //! [`defer`]: fn.defer.html
 
 #![cfg_attr(feature = "nightly", feature(const_fn))]

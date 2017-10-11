@@ -55,10 +55,10 @@ impl Scope {
     /// thread-local storage fills up or when we pin the current participant a specific number of
     /// times.
     ///
-    /// It is wise to flush the bag just after passing a very large object to [`defer_free`] or
-    /// [`defer_drop`], so that it isn't sitting in the thread-local bag for a long time.
+    /// It is wise to flush the bag just after `defer`ring the deallocation of a very large object,
+    /// so that it isn't sitting in the thread-local bag for a long time.
     ///
-    /// [`defer_free`]: fn.defer_free.html [`defer_drop`]: fn.defer_drop.html
+    /// [`defer`]: fn.defer.html
     pub fn flush(&self) {
         unsafe {
             self.global.as_ref().map(|global| {
