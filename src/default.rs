@@ -4,41 +4,17 @@
 //! is registered in the default collector.  If initialized, the thread's participant will get
 //! destructed on thread exit, which in turn unregisters the thread.
 
-use std::ops::Deref;
-
-use internal::{Global, Local};
+use collector::{Collector, Handle};
 use scope::Scope;
 
 lazy_static! {
     /// The global data for the default garbage collector.
-    static ref GLOBAL: Global = Global::new();
+    static ref COLLECTOR: Collector = Collector::new();
 }
 
 thread_local! {
     /// The per-thread participant for the default garbage collector.
-    static HANDLE: DefaultHandle = DefaultHandle::new();
-}
-
-struct DefaultHandle(Local);
-
-impl DefaultHandle {
-    fn new() -> Self {
-        Self { 0: Local::new(&GLOBAL) }
-    }
-}
-
-impl Deref for DefaultHandle {
-    type Target = Local;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl Drop for DefaultHandle {
-    fn drop(&mut self) {
-        unsafe { self.0.unregister(&GLOBAL) }
-    }
+    static HANDLE: Handle = COLLECTOR.handle();
 }
 
 /// Pin the current thread.
@@ -48,7 +24,7 @@ where
 {
     // FIXME(jeehoonkang): thread-local storage may be destructed at the time `pin()` is called. For
     // that case, we should use `HANDLE.try_with()` instead.
-    HANDLE.with(|handle| unsafe { handle.pin(&GLOBAL, f) })
+    HANDLE.with(|handle| handle.pin(f))
 }
 
 /// Check if the current thread is pinned.
