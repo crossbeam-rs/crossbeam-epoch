@@ -87,7 +87,7 @@ impl<T> Queue<T> {
     }
 
     /// Adds `t` to the back of the queue, possibly waking up threads blocked on `pop`.
-    pub fn push<'scope>(&'scope self, t: T, scope: &'scope Scope) {
+    pub fn push(&self, t: T, scope: &Scope) {
         let new = Owned::new(Node {
             data: ManuallyDrop::new(t),
             next: Atomic::null(),
@@ -107,7 +107,7 @@ impl<T> Queue<T> {
 
     /// Attempts to pop a data node. `Ok(None)` if queue is empty; `Err(())` if lost race to pop.
     #[inline(always)]
-    fn pop_internal<'scope>(&'scope self, scope: &'scope Scope) -> Result<Option<T>, ()> {
+    fn pop_internal(&self, scope: &Scope) -> Result<Option<T>, ()> {
         let head = self.head.load(Acquire, scope);
         let h = unsafe { head.deref() };
         let next = h.next.load(Acquire, scope);
@@ -128,11 +128,7 @@ impl<T> Queue<T> {
     /// Attempts to pop a data node, if the data satisfies the given condition. `Ok(None)` if queue
     /// is empty or the data does not satisfy the condition; `Err(())` if lost race to pop.
     #[inline(always)]
-    fn pop_if_internal<'scope, F>(
-        &'scope self,
-        condition: F,
-        scope: &'scope Scope,
-    ) -> Result<Option<T>, ()>
+    fn pop_if_internal<F>(&self, condition: F, scope: &Scope) -> Result<Option<T>, ()>
     where
         T: Sync,
         F: Fn(&T) -> bool,
@@ -157,7 +153,7 @@ impl<T> Queue<T> {
     /// Attempts to dequeue from the front.
     ///
     /// Returns `None` if the queue is observed to be empty.
-    pub fn try_pop<'scope>(&'scope self, scope: &'scope Scope) -> Option<T> {
+    pub fn try_pop(&self, scope: &Scope) -> Option<T> {
         loop {
             if let Ok(head) = self.pop_internal(scope) {
                 return head;
@@ -169,7 +165,7 @@ impl<T> Queue<T> {
     ///
     /// Returns `None` if the queue is observed to be empty, or the head does not satisfy the given
     /// condition.
-    pub fn try_pop_if<'scope, F>(&'scope self, condition: F, scope: &'scope Scope) -> Option<T>
+    pub fn try_pop_if<F>(&self, condition: F, scope: &Scope) -> Option<T>
     where
         T: Sync,
         F: Fn(&T) -> bool,
