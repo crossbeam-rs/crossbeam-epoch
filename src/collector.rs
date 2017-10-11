@@ -19,7 +19,7 @@ use std::sync::Arc;
 use internal::{Global, Local};
 use scope::{Scope, unprotected};
 
-/// General-purpose garbage collector.
+/// An epoch-based garbage collector.
 pub struct Collector(Arc<Global>);
 
 /// A handle to a garbage collector.
