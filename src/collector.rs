@@ -17,7 +17,7 @@
 
 use std::sync::Arc;
 use internal::{Global, Local};
-use scope::{Scope, unprotected};
+use scope::Scope;
 
 /// An epoch-based garbage collector.
 pub struct Collector(Arc<Global>);
@@ -32,19 +32,6 @@ impl Collector {
     /// Creates a new collector.
     pub fn new() -> Self {
         Self { 0: Arc::new(Global::new()) }
-    }
-
-    /// Collect several bags from the global garbage queue and destroy their objects.
-    ///
-    /// # Safety
-    ///
-    /// It is assumed that no handles are concurrently accessing objects in the global garbage
-    /// queue. Otherwise, the behavior is undefined. For example, if there are concurrent calls to
-    /// `Collector::collect()`, then a thread may try to read from a node in the queue after it is
-    /// deallocated by a concurrent thread.
-    #[inline]
-    pub unsafe fn collect(&self) {
-        unprotected(|scope| self.0.collect(scope))
     }
 
     /// Creates a new handle for the collector.
