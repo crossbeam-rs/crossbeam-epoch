@@ -69,12 +69,12 @@ impl Global {
 
     /// Returns the global epoch.
     #[inline]
-    pub(crate) fn get_epoch(&self) -> usize {
+    pub fn get_epoch(&self) -> usize {
         self.epoch.load(Ordering::Relaxed)
     }
 
     /// Pushes the bag onto the global queue and replaces the bag with a new empty bag.
-    pub(crate) fn push_bag(&self, bag: &mut Bag, scope: &Scope) {
+    pub fn push_bag(&self, bag: &mut Bag, scope: &Scope) {
         let epoch = self.epoch.load(Ordering::Relaxed);
         let bag = ::std::mem::replace(bag, Bag::new());
         ::std::sync::atomic::fence(Ordering::SeqCst);
@@ -89,7 +89,7 @@ impl Global {
     /// path. In other words, we want the compiler to optimize branching for the case when
     /// `collect()` is not called.
     #[cold]
-    pub(crate) fn collect(&self, scope: &Scope) {
+    pub fn collect(&self, scope: &Scope) {
         let epoch = self.epoch.try_advance(&self.registries, scope);
 
         let condition = |bag: &(usize, Bag)| {

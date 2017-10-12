@@ -39,7 +39,9 @@ impl Collector {
     /// # Safety
     ///
     /// It is assumed that no handles are concurrently accessing objects in the global garbage
-    /// queue. Otherwise, the behavior is undefined.
+    /// queue. Otherwise, the behavior is undefined. For example, if there are concurrent calls to
+    /// `Collector::collect()`, then a thread may try to read from a node in the queue after it is
+    /// deallocated by a concurrent thread.
     #[inline]
     pub unsafe fn collect(&self) {
         unprotected(|scope| self.0.collect(scope))
