@@ -104,7 +104,12 @@ impl<T> List<T> {
     /// Inserts `data` after into the head of the list.
     #[inline]
     #[allow(dead_code)]
-    pub fn insert_after<'scope>(&'scope self, after: &'scope Atomic<Node<T>>, data: T, scope: &'scope Scope) -> Ptr<'scope, Node<T>> {
+    pub fn insert_after<'scope>(
+        &'scope self,
+        after: &'scope Atomic<Node<T>>,
+        data: T,
+        scope: &'scope Scope,
+    ) -> Ptr<'scope, Node<T>> {
         Self::insert_internal(after, data, scope)
     }
 

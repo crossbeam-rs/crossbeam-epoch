@@ -105,16 +105,14 @@ mod tests {
         drop(collector);
 
         for _ in 0..100 {
-            handle.pin(|scope| {
-                unsafe {
-                    let a = Owned::new(7).into_ptr(scope);
-                    scope.defer(move || a.into_owned());
+            handle.pin(|scope| unsafe {
+                let a = Owned::new(7).into_ptr(scope);
+                scope.defer(move || a.into_owned());
 
-                    assert!(!(*scope.bag).is_empty());
+                assert!(!(*scope.bag).is_empty());
 
-                    while !(*scope.bag).is_empty() {
-                        scope.flush();
-                    }
+                while !(*scope.bag).is_empty() {
+                    scope.flush();
                 }
             });
         }
@@ -139,22 +137,24 @@ mod tests {
     fn pin_holds_advance() {
         let collector = Collector::new();
 
-        let threads = (0..NUM_THREADS).map(|_| {
-            scoped::scope(|scope| {
-                scope.spawn(|| {
-                    let handle = collector.handle();
-                    for _ in 0..500_000 {
-                        handle.pin(|scope| {
-                            let before = collector.0.get_epoch();
-                            collector.0.collect(scope);
-                            let after = collector.0.get_epoch();
+        let threads = (0..NUM_THREADS)
+            .map(|_| {
+                scoped::scope(|scope| {
+                    scope.spawn(|| {
+                        let handle = collector.handle();
+                        for _ in 0..500_000 {
+                            handle.pin(|scope| {
+                                let before = collector.0.get_epoch();
+                                collector.0.collect(scope);
+                                let after = collector.0.get_epoch();
 
-                            assert!(after.wrapping_sub(before) <= 2);
-                        });
-                    }
+                                assert!(after.wrapping_sub(before) <= 2);
+                            });
+                        }
+                    })
                 })
             })
-        }).collect::<Vec<_>>();
+            .collect::<Vec<_>>();
         drop(collector);
 
         for t in threads {
@@ -212,9 +212,7 @@ mod tests {
         });
 
         for _ in 0..100_000 {
-            handle.pin(|scope| {
-                collector.0.collect(scope);
-            });
+            handle.pin(|scope| { collector.0.collect(scope); });
         }
         assert!(DESTROYS.load(Ordering::Relaxed) < COUNT);
 
@@ -361,19 +359,21 @@ mod tests {
 
         let collector = Collector::new();
 
-        let threads = (0..THREADS).map(|_| {
-            scoped::scope(|scope| {
-                scope.spawn(|| {
-                    let handle = collector.handle();
-                    for _ in 0..COUNT {
-                        handle.pin(|scope| unsafe {
-                            let a = Owned::new(Elem(7i32)).into_ptr(scope);
-                            scope.defer(move || a.into_owned());
-                        });
-                    }
+        let threads = (0..THREADS)
+            .map(|_| {
+                scoped::scope(|scope| {
+                    scope.spawn(|| {
+                        let handle = collector.handle();
+                        for _ in 0..COUNT {
+                            handle.pin(|scope| unsafe {
+                                let a = Owned::new(Elem(7i32)).into_ptr(scope);
+                                scope.defer(move || a.into_owned());
+                            });
+                        }
+                    })
                 })
             })
-        }).collect::<Vec<_>>();
+            .collect::<Vec<_>>();
 
         for t in threads {
             t.join();
