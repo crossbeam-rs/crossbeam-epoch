@@ -101,7 +101,7 @@ impl<T> List<T> {
         Self::insert_internal(&self.head, data, scope)
     }
 
-    /// Inserts `data` after into the head of the list.
+    /// Inserts `data` after `after` into the list.
     #[inline]
     #[allow(dead_code)]
     pub fn insert_after<'scope>(
