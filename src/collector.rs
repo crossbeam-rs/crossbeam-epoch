@@ -203,9 +203,9 @@ mod tests {
 
         handle.pin(|scope| unsafe {
             for _ in 0..COUNT {
-                let a = Owned::new(7i32).into_ptr(scope).as_raw() as usize;
+                let a = Owned::new(7i32).into_ptr(scope);
                 scope.defer(move || {
-                    drop(Owned::from_raw(a as *mut i32));
+                    drop(a.into_owned());
                     DESTROYS.fetch_add(1, Ordering::Relaxed);
                 });
             }
@@ -264,9 +264,9 @@ mod tests {
 
         handle.pin(|scope| unsafe {
             for _ in 0..COUNT {
-                let a = Owned::new(7i32).into_ptr(scope).as_raw() as usize;
+                let a = Owned::new(7i32).into_ptr(scope);
                 scope.defer(move || {
-                    drop(Owned::from_raw(a as *mut i32));
+                    drop(a.into_owned());
                     DESTROYS.fetch_add(1, Ordering::Relaxed);
                 });
             }
