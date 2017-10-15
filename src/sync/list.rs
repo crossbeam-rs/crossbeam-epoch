@@ -10,7 +10,7 @@ use crossbeam_utils::cache_padded::CachePadded;
 
 
 /// An entry in the linked list.
-struct NodeInner<T> {
+struct NodeInner<T: Sync> {
     /// The data in the entry.
     data: T,
 
@@ -19,17 +19,17 @@ struct NodeInner<T> {
     next: Atomic<Node<T>>,
 }
 
-unsafe impl<T> Send for NodeInner<T> {}
+unsafe impl<T: Sync> Send for NodeInner<T> {}
 
 #[derive(Debug)]
-pub struct Node<T>(CachePadded<NodeInner<T>>);
+pub struct Node<T: Sync>(CachePadded<NodeInner<T>>);
 
 #[derive(Debug)]
-pub struct List<T> {
+pub struct List<T: Sync> {
     head: Atomic<Node<T>>,
 }
 
-pub struct Iter<'scope, T: 'scope> {
+pub struct Iter<'scope, T: Sync + 'scope> {
     /// The scope in which the iterator is operating.
     scope: &'scope Scope,
 
@@ -45,7 +45,7 @@ pub enum IterError {
     LostRace,
 }
 
-impl<T> Node<T> {
+impl<T: Sync> Node<T> {
     /// Returns the data in this entry.
     fn new(data: T) -> Self {
         Node(CachePadded::new(NodeInner {
@@ -59,14 +59,14 @@ impl<T> Node<T> {
     }
 }
 
-impl<T: 'static> Node<T> {
+impl<T: Sync + 'static> Node<T> {
     /// Marks this entry as deleted.
     pub fn delete(&self, scope: &Scope) {
         self.0.next.fetch_or(1, Release, scope);
     }
 }
 
-impl<T> List<T> {
+impl<T: Sync> List<T> {
     /// Returns a new, empty linked list.
     pub fn new() -> Self {
         List { head: Atomic::null() }
@@ -117,7 +117,7 @@ impl<T> List<T> {
     }
 }
 
-impl<T> Drop for List<T> {
+impl<T: Sync> Drop for List<T> {
     fn drop(&mut self) {
         unsafe {
             unprotected(|scope| {
@@ -132,7 +132,7 @@ impl<T> Drop for List<T> {
     }
 }
 
-impl<'scope, T> Iterator for Iter<'scope, T> {
+impl<'scope, T: Sync> Iterator for Iter<'scope, T> {
     type Item = Result<&'scope Node<T>, IterError>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -181,7 +181,7 @@ impl<'scope, T> Iterator for Iter<'scope, T> {
     }
 }
 
-impl<T> Default for List<T> {
+impl<T: Sync> Default for List<T> {
     fn default() -> Self {
         Self::new()
     }
