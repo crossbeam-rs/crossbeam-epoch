@@ -17,6 +17,16 @@ thread_local! {
     static HANDLE: Handle = COLLECTOR.handle();
 }
 
+/// Returns the default handle.
+///
+/// # Safety
+///
+/// It should not be called in another TLS storage's `drop()`, because `HANDLE` may already be
+/// droped.
+pub unsafe fn default_handle() -> &'static Handle {
+    &*HANDLE.with(|handle| handle as *const _)
+}
+
 /// Pin the current thread.
 pub fn pin<F, R>(f: F) -> R
 where
@@ -32,4 +42,15 @@ pub fn is_pinned() -> bool {
     // FIXME(jeehoonkang): thread-local storage may be destructed at the time `pin()` is called. For
     // that case, we should use `HANDLE.try_with()` instead.
     HANDLE.with(|handle| handle.is_pinned())
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_handle_flush() {
+        unsafe { default_handle().pin(|scope| { scope.flush(); }) }
+    }
 }
