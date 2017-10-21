@@ -13,44 +13,36 @@
 //! what was the global epoch at the time it was pinned. Participants also hold a pin counter that
 //! aids in periodic global epoch advancement.
 //!
-//! When a participant is pinned, a `Scope` is returned as a witness that the participant is pinned.
-//! Scopes are necessary for performing atomic operations, and for freeing/dropping locations.
-//!
-//! # Example
-//!
-//! `Global` is the global data for a garbage collector, and `Local` is a participant of a garbage
-//! collector. Use `Global` and `Local` when you want to embed a garbage collector in another
-//! systems library, e.g. memory allocator or thread manager.
-//!
-//! ```ignore
-//! let global = Global::new();
-//! let local = Local::new(&global);
-//! unsafe {
-//!     local.pin(&global, |scope| {
-//!         scope.flush();
-//!     });
-//! }
-//! ```
+//! When a participant is pinned, a `Guard` is returned as a witness that the participant is pinned.
+//! Guards are necessary for performing atomic operations, and for freeing/dropping locations.
 
 use std::cell::{Cell, UnsafeCell};
-use std::cmp;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use scope::{Scope, unprotected};
-use garbage::Bag;
-use epoch::Epoch;
-use sync::list::{List, Node};
+use std::mem::{self, ManuallyDrop};
+use std::num::Wrapping;
+use std::ptr;
+use std::sync::Arc;
+use std::sync::atomic;
+use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release, SeqCst};
+
+use crossbeam_utils::cache_padded::CachePadded;
+
+use atomic::{Atomic, Owned};
+use collector::Handle;
+use epoch::{AtomicEpoch, Epoch};
+use guard::{unprotected, Guard};
+use garbage::{Bag, Garbage};
 use sync::queue::Queue;
 
-
 /// The global data for a garbage collector.
-#[derive(Debug)]
 pub struct Global {
-    /// The head pointer of the list of participant registries.
-    registries: List<LocalEpoch>,
-    /// A reference to the global queue of garbages.
-    garbages: Queue<(usize, Bag)>,
-    /// A reference to the global epoch.
-    epoch: Epoch,
+    /// The head pointer of the list of `Local`s.
+    head: Atomic<Local>,
+
+    /// The global queue of bags of deferred functions.
+    queue: Queue<(Epoch, Bag)>,
+
+    /// The global epoch.
+    pub(crate) epoch: CachePadded<AtomicEpoch>,
 }
 
 impl Global {
@@ -61,27 +53,23 @@ impl Global {
     #[inline]
     pub fn new() -> Self {
         Self {
-            registries: List::new(),
-            garbages: Queue::new(),
-            epoch: Epoch::new(),
+            head: Atomic::null(),
+            queue: Queue::new(),
+            epoch: CachePadded::new(AtomicEpoch::new(Epoch::starting())),
         }
     }
 
-    /// Returns the global epoch.
-    #[inline]
-    pub fn get_epoch(&self) -> usize {
-        self.epoch.load(Ordering::Relaxed)
+    /// Pushes the bag into the global queue and replaces the bag with a new empty bag.
+    pub fn push_bag(&self, bag: &mut Bag, guard: &Guard) {
+        let epoch = self.epoch.load(Relaxed);
+        let bag = mem::replace(bag, Bag::new());
+
+        atomic::fence(SeqCst);
+
+        self.queue.push((epoch, bag), guard);
     }
 
-    /// Pushes the bag onto the global queue and replaces the bag with a new empty bag.
-    pub fn push_bag(&self, bag: &mut Bag, scope: &Scope) {
-        let epoch = self.epoch.load(Ordering::Relaxed);
-        let bag = ::std::mem::replace(bag, Bag::new());
-        ::std::sync::atomic::fence(Ordering::SeqCst);
-        self.garbages.push((epoch, bag), scope);
-    }
-
-    /// Collect several bags from the global garbage queue and destroy their objects.
+    /// Collects several bags from the global queue and executes deferred functions in them.
     ///
     /// Note: This may itself produce garbage and in turn allocate new bags.
     ///
@@ -89,209 +77,322 @@ impl Global {
     /// path. In other words, we want the compiler to optimize branching for the case when
     /// `collect()` is not called.
     #[cold]
-    pub fn collect(&self, scope: &Scope) {
-        let epoch = self.epoch.try_advance(&self.registries, scope);
+    pub fn collect(&self, guard: &Guard) {
+        let global_epoch = self.try_advance(guard);
 
-        let condition = |bag: &(usize, Bag)| {
+        let condition = |item: &(Epoch, Bag)| {
             // A pinned participant can witness at most one epoch advancement. Therefore, any bag
             // that is within one epoch of the current one cannot be destroyed yet.
-            let diff = epoch.wrapping_sub(bag.0);
-            cmp::min(diff, 0usize.wrapping_sub(diff)) > 2
+            global_epoch.distance(item.0) > 1
         };
 
         for _ in 0..Self::COLLECT_STEPS {
-            match self.garbages.try_pop_if(&condition, scope) {
+            match self.queue.try_pop_if(&condition, guard) {
                 None => break,
                 Some(bag) => drop(bag),
             }
         }
     }
+
+    /// Attempts to advance the global epoch.
+    ///
+    /// The global epoch can advance only if all currently pinned participants have been pinned in
+    /// the current epoch.
+    ///
+    /// Returns the current global epoch.
+    ///
+    /// `try_advance()` is annotated `#[cold]` because it is rarely called.
+    #[cold]
+    pub fn try_advance(&self, guard: &Guard) -> Epoch {
+        let global_epoch = self.epoch.load(Relaxed);
+        atomic::fence(SeqCst);
+
+        // TODO(stjepang): `Local`s are stored in a linked list because linked lists are fairly
+        // easy to implement in a lock-free manner. However, traversal can be slow due to cache
+        // misses and data dependencies. We should experiment with other data structures as well.
+        let mut pred = &self.head;
+        let mut curr = pred.load(Acquire, guard);
+
+        while let Some(c) = unsafe { curr.as_ref() } {
+            let succ = c.next.load(Acquire, guard);
+
+            if succ.tag() == 1 {
+                // This thread has exited. Try unlinking it from the list.
+                let succ = succ.with_tag(0);
+
+                if pred.compare_and_set(curr, succ, AcqRel, guard).is_err() {
+                    // We lost the race to unlink the thread. Usually that means we should traverse
+                    // the list again from the beginning, but since another thread trying to
+                    // advance the epoch has won the race, we leave the job to that one.
+                    return global_epoch;
+                }
+
+                // The unlinked entry can later be freed.
+                unsafe {
+                    guard.defer(move || curr.into_owned());
+                }
+
+                // Move forward, but don't change the predecessor.
+                curr = succ;
+            } else {
+                let local_epoch = c.epoch.load(Relaxed);
+
+                // If the participant was pinned in a different epoch, we cannot advance the global
+                // epoch just yet.
+                if local_epoch.is_pinned() && local_epoch.unpinned() != global_epoch {
+                    return global_epoch;
+                }
+
+                // Move one step forward.
+                pred = &c.next;
+                curr = succ;
+            }
+        }
+
+        atomic::fence(Acquire);
+
+        // All pinned participants were pinned in the current global epoch.
+        // Now let's advance the global epoch...
+        //
+        // Note that if another thread already advanced it before us, this store will simply
+        // overwrite the global epoch with the same value. This is true because `try_advance` was
+        // called from a thread that was pinned in `global_epoch`, and the global epoch cannot be
+        // advanced two steps ahead of it.
+        let new_epoch = global_epoch.successor();
+        self.epoch.store(new_epoch, Release);
+        new_epoch
+    }
 }
 
-// FIXME(stjepang): Registries are stored in a linked list because linked lists are fairly easy to
-// implement in a lock-free manner. However, traversal is rather slow due to cache misses and data
-// dependencies. We should experiment with other data structures as well.
-/// Participant for garbage collection
-#[derive(Debug)]
+impl Drop for Global {
+    fn drop(&mut self) {
+        unsafe {
+            let guard = &unprotected();
+            let mut curr = self.head.load(Relaxed, guard);
+
+            while let Some(c) = curr.as_ref() {
+                let succ = c.next.load(Relaxed, guard);
+                debug_assert_eq!(succ.tag(), 1);
+
+                let o = curr.into_owned();
+                debug_assert!((*o.bag.get()).is_empty());
+                drop(o);
+
+                curr = succ;
+            }
+        }
+    }
+}
+
+/// Participant for garbage collection.
 pub struct Local {
-    /// The local garbage objects that will be later freed.
-    bag: UnsafeCell<Bag>,
-    /// This participant's entry in the local epoch list.  It points to a node in `Global`, so it is
-    /// alive as far as the `Global` is alive.
-    local_epoch: *const Node<LocalEpoch>,
-    /// Whether the participant is currently pinned.
-    is_pinned: Cell<bool>,
+    /// A reference to the global data.
+    ///
+    /// When all guards and handles get dropped, this reference is destroyed.
+    global: UnsafeCell<ManuallyDrop<Arc<Global>>>,
+
+    /// Pointer to the next entry in the linked list of registered participants.
+    ///
+    /// If an entry's `next` pointer is tagged with 1, it is considered to be deleted.
+    next: Atomic<Local>,
+
+    /// The local bag of deferred functions.
+    pub(crate) bag: UnsafeCell<Bag>,
+
+    /// The number of guards keeping this participant pinned.
+    guard_count: Cell<usize>,
+
+    /// The number of active handles.
+    handle_count: Cell<usize>,
+
     /// Total number of pinnings performed.
-    pin_count: Cell<usize>,
+    ///
+    /// This is just an auxilliary counter that sometimes kicks off collection.
+    pin_count: Cell<Wrapping<usize>>,
+
+    /// The local epoch.
+    epoch: AtomicEpoch,
 }
 
-/// An entry in the linked list of the registered participants.
-#[derive(Default, Debug)]
-pub struct LocalEpoch {
-    /// The least significant bit is set if the participant is currently pinned. The rest of the
-    /// bits encode the current epoch.
-    state: AtomicUsize,
-}
+unsafe impl Sync for Local {}
 
 impl Local {
-    /// Number of pinnings after which a participant will collect some global garbage.
-    const PINS_BETWEEN_COLLECT: usize = 128;
+    /// Number of pinnings after which a participant will execute some deferred functions from the
+    /// global queue.
+    const PINNINGS_BETWEEN_COLLECT: usize = 128;
 
-    /// Creates a participant to the garbage collection global data.
-    #[inline]
-    pub fn new(global: &Global) -> Self {
-        let local_epoch = unsafe {
+    /// Registers a new `Local` in the provided `Global`.
+    pub fn register(global: Arc<Global>) -> Handle {
+        unsafe {
             // Since we dereference no pointers in this block, it is safe to use `unprotected`.
-            unprotected(|scope| {
-                global.registries.insert(LocalEpoch::new(), scope).as_raw()
-            })
-        };
+            let guard = &unprotected();
 
-        Self {
-            bag: UnsafeCell::new(Bag::new()),
-            local_epoch,
-            is_pinned: Cell::new(false),
-            pin_count: Cell::new(0),
+            let mut new = Owned::new(Local {
+                global: UnsafeCell::new(ManuallyDrop::new(global.clone())),
+                next: Atomic::null(),
+                bag: UnsafeCell::new(Bag::new()),
+                guard_count: Cell::new(0),
+                handle_count: Cell::new(1),
+                pin_count: Cell::new(Wrapping(0)),
+                epoch: AtomicEpoch::new(Epoch::starting()),
+            });
+            let mut head = global.head.load(Acquire, guard);
+
+            loop {
+                new.next.store(head, Relaxed);
+
+                // Try installing this thread's entry as the new head.
+                match global
+                    .head
+                    .compare_and_set_weak_owned(head, new, AcqRel, guard)
+                {
+                    Ok(n) => return Handle { local: n.as_raw() },
+                    Err((h, n)) => {
+                        head = h;
+                        new = n;
+                    }
+                }
+            }
         }
     }
 
-    /// Pins the current participant, executes a function, and unpins the participant.
-    ///
-    /// The provided function takes a `Scope`, which can be used to interact with [`Atomic`]s. The
-    /// scope serves as a proof that whatever data you load from an [`Atomic`] will not be
-    /// concurrently deleted by another participant while the scope is alive.
-    ///
-    /// Note that keeping a participant pinned for a long time prevents memory reclamation of any
-    /// newly deleted objects protected by [`Atomic`]s. The provided function should be very quick -
-    /// generally speaking, it shouldn't take more than 100 ms.
-    ///
-    /// Pinning is reentrant. There is no harm in pinning a participant while it's already pinned
-    /// (repinning is essentially a noop).
-    ///
-    /// Pinning itself comes with a price: it begins with a `SeqCst` fence and performs a few other
-    /// atomic operations. However, this mechanism is designed to be as performant as possible, so
-    /// it can be used pretty liberally. On a modern machine pinning takes 10 to 15 nanoseconds.
-    ///
-    /// # Safety
-    ///
-    /// You should pass `global` that is used to create this `Local`. Otherwise, the behavior is
-    /// undefined.
-    ///
-    /// [`Atomic`]: struct.Atomic.html
-    pub unsafe fn pin<F, R>(&self, global: &Global, f: F) -> R
-    where
-        F: FnOnce(&Scope) -> R,
-    {
-        let local_epoch = (*self.local_epoch).get();
-        let scope = Scope {
-            global,
-            bag: self.bag.get(),
-        };
-
-        let was_pinned = self.is_pinned.get();
-        if !was_pinned {
-            // Increment the pin counter.
-            let count = self.pin_count.get();
-            self.pin_count.set(count.wrapping_add(1));
-
-            // Pin the participant.
-            self.is_pinned.set(true);
-            let epoch = global.get_epoch();
-            local_epoch.set_pinned(epoch);
-
-            // If the counter progressed enough, try advancing the epoch and collecting garbage.
-            if count % Self::PINS_BETWEEN_COLLECT == 0 {
-                global.collect(&scope);
-            }
-        }
-
-        // This will unpin the participant even if `f` panics.
-        defer! {
-            if !was_pinned {
-                // Unpin the participant.
-                local_epoch.set_unpinned();
-                self.is_pinned.set(false);
-            }
-        }
-
-        f(&scope)
+    /// Returns a reference to the `Global` in which this `Local` resides.
+    #[inline]
+    pub fn global(&self) -> &Global {
+        unsafe { &*self.global.get() }
     }
 
     /// Returns `true` if the current participant is pinned.
     #[inline]
     pub fn is_pinned(&self) -> bool {
-        self.is_pinned.get()
+        self.guard_count.get() > 0
     }
 
-    /// Unregisters itself from the garbage collector.
-    ///
-    /// # Safety
-    ///
-    /// You should pass `global` that is used to create this `Local`. Also, a `Local` should be
-    /// unregistered once, and after it is unregistered it should not be `pin()`ned. Otherwise, the
-    /// behavior is undefined.
-    pub unsafe fn unregister(&self, global: &Global) {
-        // Now that the participant is exiting, we must move the local bag into the global garbage
-        // queue. Also, let's try advancing the epoch and help free some garbage.
+    pub fn defer(&self, mut garbage: Garbage, guard: &Guard) {
+        let bag = unsafe { &mut *self.bag.get() };
 
-        self.pin(global, |scope| {
-            // Spare some cycles on garbage collection.
-            global.collect(scope);
-
-            // Unregister the participant by marking this entry as deleted.
-            (*self.local_epoch).delete(scope);
-
-            // Push the local bag into the global garbage queue.
-            global.push_bag(&mut *self.bag.get(), scope);
-        });
-    }
-}
-
-impl LocalEpoch {
-    /// Creates a new local epoch.
-    #[inline]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Returns if the participant is pinned, and if so, the epoch at which it is pinned.
-    #[inline]
-    pub fn get_state(&self) -> (bool, usize) {
-        let state = self.state.load(Ordering::Relaxed);
-        ((state & 1) == 1, state & !1)
-    }
-
-    /// Marks the participant as pinned.
-    ///
-    /// Must not be called if the participant is already pinned!
-    #[inline]
-    pub fn set_pinned(&self, epoch: usize) {
-        let state = epoch | 1;
-
-        // Now we must store `state` into `self.state`. It's important that any succeeding loads
-        // don't get reordered with this store. In order words, this participant's epoch must be
-        // fully announced to other participants. Only then it becomes safe to load from the shared
-        // memory.
-        if cfg!(any(target_arch = "x86", target_arch = "x86_64")) {
-            // On x86 architectures we have a choice:
-            // 1. `atomic::fence(SeqCst)`, which compiles to a `mfence` instruction.
-            // 2. `compare_and_swap(_, _, SeqCst)`, which compiles to a `lock cmpxchg` instruction.
-            //
-            // Both instructions have the effect of a full barrier, but the second one seems to be
-            // faster in this particular case.
-            let result = self.state.compare_and_swap(0, state, Ordering::SeqCst);
-            debug_assert_eq!(0, result, "LocalEpoch::set_pinned()'s CAS should succeed.");
-        } else {
-            self.state.store(state, Ordering::Relaxed);
-            ::std::sync::atomic::fence(Ordering::SeqCst);
+        while let Err(g) = bag.try_push(garbage) {
+            self.global().push_bag(bag, guard);
+            garbage = g;
         }
     }
 
-    /// Marks the participant as unpinned.
+    pub fn flush(&self, guard: &Guard) {
+        let bag = unsafe { &mut *self.bag.get() };
+
+        if !bag.is_empty() {
+            self.global().push_bag(bag, guard);
+        }
+
+        self.global().collect(guard);
+    }
+
+    /// Pins the `Local`.
     #[inline]
-    pub fn set_unpinned(&self) {
-        // Clear the last bit.
-        // We don't need to preserve the epoch, so just store the number zero.
-        self.state.store(0, Ordering::Release);
+    pub fn pin(&self) -> Guard {
+        let guard = Guard { local: self };
+
+        let guard_count = self.guard_count.get();
+        self.guard_count.set(guard_count.checked_add(1).unwrap());
+
+        if guard_count == 0 {
+            let global_epoch = self.global().epoch.load(Relaxed);
+            let new_epoch = global_epoch.pinned();
+
+            // Now we must store `new_epoch` into `self.epoch` and execute a `SeqCst` fence.
+            // The fence makes sure that any future loads from `Atomic`s will not happen before
+            // this store.
+            if cfg!(any(target_arch = "x86", target_arch = "x86_64")) {
+                // HACK(stjepang): On x86 architectures there are two different ways of executing
+                // a `SeqCst` fence.
+                //
+                // 1. `atomic::fence(SeqCst)`, which compiles into a `mfence` instruction.
+                // 2. `_.compare_and_swap(_, _, SeqCst)`, which compiles into a `lock cmpxchg`
+                //    instruction.
+                //
+                // Both instructions have the effect of a full barrier, but benchmarks have shown
+                // that the second one makes pinning faster in this particular case.
+                let current = Epoch::starting();
+                let previous = self.epoch.compare_and_swap(current, new_epoch, SeqCst);
+                debug_assert_eq!(
+                    current,
+                    previous,
+                    "participant was expected to be unpinned"
+                );
+            } else {
+                self.epoch.store(new_epoch, Relaxed);
+                atomic::fence(SeqCst);
+            }
+
+            // Increment the pin counter.
+            let count = self.pin_count.get();
+            self.pin_count.set(count + Wrapping(1));
+
+            // After every `PINNINGS_BETWEEN_COLLECT` try advancing the epoch and collecting
+            // some garbage.
+            if count.0 % Self::PINNINGS_BETWEEN_COLLECT == 0 {
+                self.global().collect(&guard);
+            }
+        }
+
+        guard
+    }
+
+    /// Unpins the `Local`.
+    #[inline]
+    pub fn unpin(&self) {
+        let guard_count = self.guard_count.get();
+        self.guard_count.set(guard_count - 1);
+
+        if guard_count == 1 {
+            self.epoch.store(Epoch::starting(), Release);
+
+            if self.handle_count.get() == 0 {
+                Self::finalize(self);
+            }
+        }
+    }
+
+    /// Increments the handle count.
+    #[inline]
+    pub fn acquire_handle(&self) {
+        let handle_count = self.handle_count.get();
+        debug_assert!(handle_count >= 1);
+        self.handle_count.set(handle_count + 1);
+    }
+
+    /// Decrements the handle count.
+    #[inline]
+    pub fn release_handle(&self) {
+        let guard_count = self.guard_count.get();
+        let handle_count = self.handle_count.get();
+        debug_assert!(handle_count >= 1);
+        self.handle_count.set(handle_count - 1);
+
+        if guard_count == 0 && handle_count == 1 {
+            Self::finalize(self);
+        }
+    }
+
+    /// Removes the `Local` from the global linked list.
+    #[cold]
+    pub fn finalize(&self) {
+        assert_eq!(self.guard_count.get(), 0);
+        assert_eq!(self.handle_count.get(), 0);
+
+        unsafe {
+            // Take the reference to the `Global` out of this `Local`.
+            let global: Arc<Global> = ptr::read(&**self.global.get());
+
+            // Move the local bag into the global queue.
+            self.global().push_bag(&mut *self.bag.get(), &unprotected());
+            // Mark this node in the linked list as deleted.
+            self.next.fetch_or(1, SeqCst, &unprotected());
+
+            // Finally, drop the reference to the global.
+            // Note that this might be the last reference to the `Global`. If so, the global data
+            // will be destroyed and all deferred functions in its queue will be executed.
+            drop(global);
+        }
     }
 }
