@@ -1,4 +1,6 @@
 use std::borrow::{Borrow, BorrowMut};
+use std::cmp;
+use std::fmt;
 use std::marker::PhantomData;
 use std::mem;
 use std::ops::{Deref, DerefMut};
@@ -93,7 +95,6 @@ fn data_with_tag<T>(data: usize, tag: usize) -> usize {
 /// Any method that loads the pointer must be passed a reference to a [`Scope`].
 ///
 /// [`Scope`]: struct.Scope.html
-#[derive(Debug)]
 pub struct Atomic<T> {
     data: AtomicUsize,
     _marker: PhantomData<*mut T>,
@@ -184,6 +185,20 @@ impl<T> Atomic<T> {
     /// ```
     pub fn from_ptr(ptr: Ptr<T>) -> Self {
         Self::from_data(ptr.data)
+    }
+
+    /// Returns a new atomic pointer pointing to `raw`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::ptr;
+    /// use crossbeam_epoch::{Atomic, Ptr};
+    ///
+    /// let a = Atomic::from_raw(ptr::null::<i32>());
+    /// ```
+    pub fn from_raw(raw: *const T) -> Self {
+        Self::from_data(raw as usize)
     }
 
     /// Loads a `Ptr` from the atomic pointer.
@@ -560,6 +575,39 @@ impl<T> Atomic<T> {
     }
 }
 
+impl<T> fmt::Debug for Atomic<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let data = self.data.load(Ordering::SeqCst);
+        let raw = (data & !low_bits::<T>()) as *const T;
+        let tag = data & low_bits::<T>();
+
+        f.debug_struct("Atomic")
+            .field("raw", &raw)
+            .field("tag", &tag)
+            .finish()
+    }
+}
+
+impl<T> fmt::Pointer for Atomic<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let data = self.data.load(Ordering::SeqCst);
+        let raw = (data & !low_bits::<T>()) as *const T;
+        fmt::Pointer::fmt(&raw, f)
+    }
+}
+
+impl<T> Clone for Atomic<T> {
+    fn clone(&self) -> Self {
+        // NOTE: If you're cloning `Atomic`s, then you're *probably* using them as shared immutable
+        // pointers on the heap (i.e. they won't be concurrently modified at the same time they're
+        // being cloned). For that reason we'd most likely be okay with a `Relaxed` load here.
+        // However, just to avoid potential subtle pitfalls, `SeqCst` is used instead as the most
+        // conservative and safest choice of ordering.
+        let data = self.data.load(Ordering::SeqCst);
+        Atomic::from_data(data)
+    }
+}
+
 impl<T> Default for Atomic<T> {
     fn default() -> Self {
         Atomic::null()
@@ -596,7 +644,6 @@ impl<'scope, T> From<Ptr<'scope, T>> for Atomic<T> {
 ///
 /// The pointer must be properly aligned. Since it is aligned, a tag can be stored into the unused
 /// least significant bits of the address.
-#[derive(Debug)]
 pub struct Owned<T> {
     data: usize,
     _marker: PhantomData<Box<T>>,
@@ -663,7 +710,7 @@ impl<T> Owned<T> {
         Self::from_data(raw as usize)
     }
 
-    /// Converts the owned pointer to a [`Ptr`].
+    /// Converts the owned pointer into a [`Ptr`].
     ///
     /// # Examples
     ///
@@ -681,6 +728,23 @@ impl<T> Owned<T> {
         let data = self.data;
         mem::forget(self);
         Ptr::from_data(data)
+    }
+
+    /// Converts the owned pointer into a `Box`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use crossbeam_epoch::{self as epoch, Owned};
+    ///
+    /// let o = Owned::new(1234);
+    /// let b: Box<i32> = o.into_box();
+    /// assert_eq!(*b, 1234);
+    /// ```
+    pub fn into_box(self) -> Box<T> {
+        let raw = (self.data & !low_bits::<T>()) as *mut T;
+        mem::forget(self);
+        unsafe { Box::from_raw(raw) }
     }
 
     /// Returns the tag stored within the pointer.
@@ -722,6 +786,24 @@ impl<T> Drop for Owned<T> {
         unsafe {
             drop(Box::from_raw(raw));
         }
+    }
+}
+
+impl<T> fmt::Debug for Owned<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let raw = (self.data & !low_bits::<T>()) as *const T;
+        let tag = self.data & low_bits::<T>();
+
+        f.debug_struct("Owned")
+            .field("raw", &raw)
+            .field("tag", &tag)
+            .finish()
+    }
+}
+
+impl<T: Clone> Clone for Owned<T> {
+    fn clone(&self) -> Self {
+        Owned::new((**self).clone()).with_tag(self.tag())
     }
 }
 
@@ -781,7 +863,6 @@ impl<T> AsMut<T> for Owned<T> {
 ///
 /// The pointer must be properly aligned. Since it is aligned, a tag can be stored into the unused
 /// least significant bits of the address.
-#[derive(Debug)]
 pub struct Ptr<'scope, T: 'scope> {
     data: usize,
     _marker: PhantomData<(&'scope (), *const T)>,
@@ -1024,6 +1105,44 @@ impl<'scope, T> Ptr<'scope, T> {
     /// ```
     pub fn with_tag(&self, tag: usize) -> Self {
         Self::from_data(data_with_tag::<T>(self.data, tag))
+    }
+}
+
+impl<'scope, T> PartialEq<Ptr<'scope, T>> for Ptr<'scope, T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.data == other.data
+    }
+}
+
+impl<'scope, T> Eq for Ptr<'scope, T> {}
+
+impl<'scope, T> PartialOrd<Ptr<'scope, T>> for Ptr<'scope, T> {
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        self.data.partial_cmp(&other.data)
+    }
+}
+
+impl<'scope, T> Ord for Ptr<'scope, T> {
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
+        self.data.cmp(&other.data)
+    }
+}
+
+impl<'scope, T> fmt::Debug for Ptr<'scope, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let raw = (self.data & !low_bits::<T>()) as *const T;
+        let tag = self.data & low_bits::<T>();
+
+        f.debug_struct("Ptr")
+            .field("raw", &raw)
+            .field("tag", &tag)
+            .finish()
+    }
+}
+
+impl<'scope, T> fmt::Pointer for Ptr<'scope, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Pointer::fmt(&self.as_raw(), f)
     }
 }
 
