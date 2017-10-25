@@ -355,7 +355,7 @@ impl<T> Atomic<T> {
     /// epoch::pin(|scope| {
     ///     let mut curr = a.load(SeqCst, scope);
     ///     loop {
-    ///         match a.compare_and_set(curr, Ptr::null(), SeqCst, scope) {
+    ///         match a.compare_and_set_weak(curr, Ptr::null(), SeqCst, scope) {
     ///             Ok(()) => break,
     ///             Err(c) => curr = c,
     ///         }
