@@ -79,11 +79,20 @@ fn low_bits<T>() -> usize {
     (1 << mem::align_of::<T>().trailing_zeros()) - 1
 }
 
-/// Given a tagged pointer `data`, returns the same pointer, but tagged with `tag`.  `tag` is
-/// truncated to be fit into the unused bits of the pointer to `T`.
+/// Given a tagged pointer `data`, returns the same pointer, but tagged with `tag`.
+///
+/// `tag` is truncated to fit into the unused bits of the pointer to `T`.
 #[inline]
 fn data_with_tag<T>(data: usize, tag: usize) -> usize {
     (data & !low_bits::<T>()) | (tag & low_bits::<T>())
+}
+
+/// Decomposes a tagged pointer `data` into the pointer and the tag.
+#[inline]
+fn decompose_data<T>(data: usize) -> (*mut T, usize) {
+    let raw = (data & !low_bits::<T>()) as *mut T;
+    let tag = data & low_bits::<T>();
+    (raw, tag)
 }
 
 /// An atomic pointer that can be safely shared between threads.
@@ -578,8 +587,7 @@ impl<T> Atomic<T> {
 impl<T> fmt::Debug for Atomic<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let data = self.data.load(Ordering::SeqCst);
-        let raw = (data & !low_bits::<T>()) as *const T;
-        let tag = data & low_bits::<T>();
+        let (raw, tag) = decompose_data::<T>(data);
 
         f.debug_struct("Atomic")
             .field("raw", &raw)
@@ -591,19 +599,18 @@ impl<T> fmt::Debug for Atomic<T> {
 impl<T> fmt::Pointer for Atomic<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let data = self.data.load(Ordering::SeqCst);
-        let raw = (data & !low_bits::<T>()) as *const T;
+        let (raw, _) = decompose_data::<T>(data);
         fmt::Pointer::fmt(&raw, f)
     }
 }
 
 impl<T> Clone for Atomic<T> {
+    /// Returns a copy of the atomic value.
+    ///
+    /// Note that a `Relaxed` load is used here. If you need synchronization, use it with other
+    /// atomics or fences.
     fn clone(&self) -> Self {
-        // NOTE: If you're cloning `Atomic`s, then you're *probably* using them as shared immutable
-        // pointers on the heap (i.e. they won't be concurrently modified at the same time they're
-        // being cloned). For that reason we'd most likely be okay with a `Relaxed` load here.
-        // However, just to avoid potential subtle pitfalls, `SeqCst` is used instead as the most
-        // conservative and safest choice of ordering.
-        let data = self.data.load(Ordering::SeqCst);
+        let data = self.data.load(Ordering::Relaxed);
         Atomic::from_data(data)
     }
 }
@@ -742,7 +749,7 @@ impl<T> Owned<T> {
     /// assert_eq!(*b, 1234);
     /// ```
     pub fn into_box(self) -> Box<T> {
-        let raw = (self.data & !low_bits::<T>()) as *mut T;
+        let (raw, _) = decompose_data::<T>(self.data);
         mem::forget(self);
         unsafe { Box::from_raw(raw) }
     }
@@ -757,7 +764,8 @@ impl<T> Owned<T> {
     /// assert_eq!(Owned::new(1234).tag(), 0);
     /// ```
     pub fn tag(&self) -> usize {
-        self.data & low_bits::<T>()
+        let (_, tag) = decompose_data::<T>(self.data);
+        tag
     }
 
     /// Returns the same pointer, but tagged with `tag`. `tag` is truncated to be fit into the
@@ -782,7 +790,7 @@ impl<T> Owned<T> {
 
 impl<T> Drop for Owned<T> {
     fn drop(&mut self) {
-        let raw = (self.data & !low_bits::<T>()) as *mut T;
+        let (raw, _) = decompose_data::<T>(self.data);
         unsafe {
             drop(Box::from_raw(raw));
         }
@@ -791,8 +799,7 @@ impl<T> Drop for Owned<T> {
 
 impl<T> fmt::Debug for Owned<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let raw = (self.data & !low_bits::<T>()) as *const T;
-        let tag = self.data & low_bits::<T>();
+        let (raw, tag) = decompose_data::<T>(self.data);
 
         f.debug_struct("Owned")
             .field("raw", &raw)
@@ -811,13 +818,15 @@ impl<T> Deref for Owned<T> {
     type Target = T;
 
     fn deref(&self) -> &T {
-        unsafe { &*((self.data & !low_bits::<T>()) as *const T) }
+        let (raw, _) = decompose_data::<T>(self.data);
+        unsafe { &*raw }
     }
 }
 
 impl<T> DerefMut for Owned<T> {
     fn deref_mut(&mut self) -> &mut T {
-        unsafe { &mut *((self.data & !low_bits::<T>()) as *mut T) }
+        let (raw, _) = decompose_data::<T>(self.data);
+        unsafe { &mut *raw }
     }
 }
 
@@ -966,7 +975,8 @@ impl<'scope, T> Ptr<'scope, T> {
     /// });
     /// ```
     pub fn as_raw(&self) -> *const T {
-        (self.data & !low_bits::<T>()) as *const T
+        let (raw, _) = decompose_data::<T>(self.data);
+        raw
     }
 
     /// Dereferences the pointer.
@@ -1081,7 +1091,8 @@ impl<'scope, T> Ptr<'scope, T> {
     /// });
     /// ```
     pub fn tag(&self) -> usize {
-        self.data & low_bits::<T>()
+        let (_, tag) = decompose_data::<T>(self.data);
+        tag
     }
 
     /// Returns the same pointer, but tagged with `tag`. `tag` is truncated to be fit into the
@@ -1130,8 +1141,7 @@ impl<'scope, T> Ord for Ptr<'scope, T> {
 
 impl<'scope, T> fmt::Debug for Ptr<'scope, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let raw = (self.data & !low_bits::<T>()) as *const T;
-        let tag = self.data & low_bits::<T>();
+        let (raw, tag) = decompose_data::<T>(self.data);
 
         f.debug_struct("Ptr")
             .field("raw", &raw)
