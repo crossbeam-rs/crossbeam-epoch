@@ -16,13 +16,13 @@ use crossbeam_utils::cache_padded::CachePadded;
 // the `tail` pointer may lag behind the actual tail. Non-sentinel nodes are either all `Data` or
 // all `Blocked` (requests for data from blocked threads).
 #[derive(Debug)]
-pub struct Queue<T> {
+pub struct Queue<T: Send> {
     head: CachePadded<Atomic<Node<T>>>,
     tail: CachePadded<Atomic<Node<T>>>,
 }
 
 #[derive(Debug)]
-struct Node<T> {
+struct Node<T: Send> {
     /// The slot in which a value of type `T` can be stored.
     ///
     /// The type of `data` is `ManuallyDrop<T>` because a `Node<T>` doesn't always contain a `T`.
@@ -34,14 +34,14 @@ struct Node<T> {
     next: Atomic<Node<T>>,
 }
 
-unsafe impl<T> Send for Node<T> {}
+unsafe impl<T: Send> Send for Node<T> {}
 
 // Any particular `T` should never be accessed concurrently, so no need for `Sync`.
 unsafe impl<T: Send> Sync for Queue<T> {}
 unsafe impl<T: Send> Send for Queue<T> {}
 
 
-impl<T> Queue<T> {
+impl<T: Send> Queue<T> {
     /// Create a new, empty queue.
     pub fn new() -> Queue<T> {
         let q = Queue {
@@ -178,7 +178,7 @@ impl<T> Queue<T> {
     }
 }
 
-impl<T> Drop for Queue<T> {
+impl<T: Send> Drop for Queue<T> {
     fn drop(&mut self) {
         unsafe {
             unprotected(|scope| {
@@ -199,11 +199,11 @@ mod test {
     use crossbeam_utils::scoped;
     use pin;
 
-    struct Queue<T> {
+    struct Queue<T: Send> {
         queue: super::Queue<T>,
     }
 
-    impl<T> Queue<T> {
+    impl<T: Send> Queue<T> {
         pub fn new() -> Queue<T> {
             Queue { queue: super::Queue::new() }
         }
