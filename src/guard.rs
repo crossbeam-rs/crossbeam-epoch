@@ -46,8 +46,8 @@ use internal::Local;
 /// # Multiple guards
 ///
 /// Pinning is reentrant and it is perfectly legal to create multiple guards. In that case, the
-/// thread will be pinned only when the first guard is created and unpinned when the last one is
-/// dropped:
+/// thread will actually be pinned only when the first guard is created and unpinned when the last
+/// one is dropped:
 ///
 /// ```
 /// use crossbeam_epoch as epoch;
@@ -59,6 +59,15 @@ use internal::Local;
 /// assert!(epoch::is_pinned());
 /// drop(guard2);
 /// assert!(!epoch::is_pinned());
+/// ```
+///
+/// The same can be achieved by cloning guards:
+///
+/// ```
+/// use crossbeam_epoch as epoch;
+///
+/// let guard1 = epoch::pin();
+/// let guard2 = guard1.clone();
 /// ```
 ///
 /// [`pin`]: fn.pin.html
@@ -194,34 +203,62 @@ impl Drop for Guard {
     }
 }
 
-/// Creates a dummy guard that doesn't really pin the current thread.
+impl Clone for Guard {
+    #[inline]
+    fn clone(&self) -> Guard {
+        match unsafe { self.local.as_ref() } {
+            None => Guard { local: ptr::null() },
+            Some(local) => local.pin(),
+        }
+    }
+}
+
+/// Returns a reference to a dummy guard that allows unprotected access to [`Atomic`]s.
 ///
-/// This is a function for special uses only. It creates a guard that can be used for loading
-/// [`Atomic`]s, but will not pin or unpin the current thread. Calling [`defer`] with a dummy guard
-/// will simply execute the function immediately.
+/// This guard should be used in special occasions only. Note that it doesn't actually keep any
+/// thread pinned - it's just a fake guard that allows loading from [`Atomic`]s unsafely.
+///
+/// Note that calling [`defer`] with a dummy guard will not defer the function - it will just
+/// execute the function immediately.
+///
+/// If necessary, it's possible to create more dummy guards by cloning: `unprotected().clone()`.
 ///
 /// # Safety
 ///
-/// Loading and dereferencing data from an [`Atomic`] using a dummy guard is safe only if the
+/// Loading and dereferencing data from an [`Atomic`] using this guard is safe only if the
 /// [`Atomic`] is not being concurrently modified by other threads.
 ///
 /// # Examples
 ///
 /// ```
-/// use crossbeam_epoch as epoch;
+/// use crossbeam_epoch::{self as epoch, Atomic};
+/// use std::sync::atomic::Ordering::Relaxed;
+///
+/// let a = Atomic::new(7);
 ///
 /// unsafe {
-///     let guard = &epoch::unprotected();
-///     guard.defer(move || {
+///     // Load `a` without pinning the current thread.
+///     a.load(Relaxed, epoch::unprotected());
+///
+///     // It's possible to create more dummy guards by calling `clone()`.
+///     let dummy = &epoch::unprotected().clone();
+///
+///     dummy.defer(move || {
 ///         println!("This gets executed immediately.");
 ///     });
+///
+///     // Dropping `dummy` doesn't affect the current thread - it's just a noop.
 /// }
 /// ```
 ///
 /// The most common use of this function is when constructing or destructing a data structure.
 ///
 /// For example, we can use a dummy guard in the destructor of a Treiber stack because at that
-/// point no other thread could concurrently modify the [`Atomic`]s we are accessing:
+/// point no other thread could concurrently modify the [`Atomic`]s we are accessing.
+///
+/// If we were to actually pin the current thread during destruction, that would just unnecessarily
+/// delay garbage collection and incur some performance cost, so in cases like these `unprotected`
+/// is very helpful.
 ///
 /// ```
 /// use crossbeam_epoch::{self as epoch, Atomic};
@@ -240,13 +277,12 @@ impl Drop for Guard {
 /// impl<T> Drop for Stack<T> {
 ///     fn drop(&mut self) {
 ///         unsafe {
-///             // Create a dummy guard.
-///             let guard = &epoch::unprotected();
-///
-///             let mut node = self.head.load(Relaxed, guard);
+///             // Unprotected load.
+///             let mut node = self.head.load(Relaxed, epoch::unprotected());
 ///
 ///             while let Some(n) = node.as_ref() {
-///                 let next = n.next.load(Relaxed, guard);
+///                 // Unprotected load.
+///                 let next = n.next.load(Relaxed, epoch::unprotected());
 ///
 ///                 // Take ownership of the node, then drop its data and deallocate it.
 ///                 let mut o = node.into_owned();
@@ -260,12 +296,10 @@ impl Drop for Guard {
 /// }
 /// ```
 ///
-/// Really pinning the current thread would only unnecessarily delay garbage collection and incur
-/// some performance cost, so in cases like these `unprotected` is of great help.
-///
 /// [`Atomic`]: struct.Atomic.html
 /// [`defer`]: struct.Guard.html#method.defer
 #[inline]
-pub unsafe fn unprotected() -> Guard {
-    Guard { local: ptr::null() }
+pub unsafe fn unprotected() -> &'static Guard {
+    static UNPROTECTED: usize = 0;
+    &*(&UNPROTECTED as *const _ as *const Guard)
 }
