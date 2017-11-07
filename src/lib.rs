@@ -59,6 +59,8 @@ extern crate arrayvec;
 extern crate crossbeam_utils;
 #[macro_use]
 extern crate lazy_static;
+#[macro_use]
+extern crate memoffset;
 
 mod atomic;
 mod collector;
