@@ -84,7 +84,7 @@ pub struct List<T, C: Container<T>> {
 }
 
 /// An auxiliary data for iterating over a linked list.
-pub struct Iter<'g, T, C: Container<T>> {
+pub struct Iter<'g, T: 'g, C: Container<T>> {
     /// The guard that protects the iteration.
     guard: &'g Guard,
 
@@ -95,14 +95,15 @@ pub struct Iter<'g, T, C: Container<T>> {
     curr: Ptr<'g, Entry>,
 
     /// The phantom data for container.
-    _marker: PhantomData<(T, C)>,
+    _marker: PhantomData<(&'g T, C)>,
 }
 
 /// An enum for iteration error.
 #[derive(PartialEq, Debug)]
 pub enum IterError {
-    /// Iterator lost a race in deleting an entry by a concurrent iterator.
-    LostRace,
+    /// Iterator was stalled by another iterator. Internally, the thread lost a race in deleting a
+    /// node by a concurrent thread.
+    Stalled,
 }
 
 impl Default for Entry {
@@ -228,9 +229,9 @@ impl<'g, T: 'g, C: Container<T>> Iterator for Iter<'g, T, C> {
                     }
                     Err(succ) => {
                         // We lost the race to delete the entry by a concurrent iterator. Set
-                        // `self.curr` to the updated pointer, and report the lost.
+                        // `self.curr` to the updated pointer, and report that we are stalled.
                         self.curr = succ;
-                        return Some(Err(IterError::LostRace));
+                        return Some(Err(IterError::Stalled));
                     }
                 }
 

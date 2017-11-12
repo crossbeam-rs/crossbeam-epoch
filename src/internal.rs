@@ -113,10 +113,9 @@ impl Global {
         // misses and data dependencies. We should experiment with other data structures as well.
         for local in self.locals.iter(&guard) {
             match local {
-                Err(IterError::LostRace) => {
-                    // We lost the race to unlink the thread. Usually that means we should traverse
-                    // the list again from the beginning, but since another thread trying to advance
-                    // the epoch has won the race, we leave the job to that one.
+                Err(IterError::Stalled) => {
+                    // The iteration is stalled by another thread's iteration. Since that thread
+                    // also tries to advance the epoch, we leave the job to that thread.
                     return global_epoch;
                 }
                 Ok(local) => {
