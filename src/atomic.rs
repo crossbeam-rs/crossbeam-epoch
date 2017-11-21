@@ -362,9 +362,9 @@ impl<T> Atomic<T> {
     ///             ptr = p;
     ///             break;
     ///         }
-    ///         Err((p, n)) => {
-    ///             ptr = p;
-    ///             new = n;
+    ///         Err(err) => {
+    ///             ptr = err.previous;
+    ///             new = err.new;
     ///         }
     ///     }
     /// }
@@ -373,7 +373,7 @@ impl<T> Atomic<T> {
     /// loop {
     ///     match a.compare_and_set_weak(curr, Shared::null(), SeqCst, guard) {
     ///         Ok(_) => break,
-    ///         Err((c, _)) => curr = c,
+    ///         Err(err) => curr = err.previous,
     ///     }
     /// }
     /// ```
@@ -383,7 +383,7 @@ impl<T> Atomic<T> {
         new: P,
         ord: O,
         _: &'g Guard,
-    ) -> Result<Shared<'g, T>, (Shared<'g, T>, P)>
+    ) -> Result<Shared<'g, T>, CompareAndSetError<'g, T, P>>
     where
         O: CompareAndSetOrdering,
         P: Pointer<T>,
@@ -393,7 +393,10 @@ impl<T> Atomic<T> {
             .compare_exchange_weak(current.into_word(), new, ord.success(), ord.failure())
             .map(|_| unsafe { Shared::from_word(new) })
             .map_err(|previous| unsafe {
-                (Shared::from_word(previous), P::from_word(new))
+                CompareAndSetError {
+                    previous: Shared::from_word(previous),
+                    new: P::from_word(new),
+                }
             })
     }
 
