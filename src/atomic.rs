@@ -1030,7 +1030,7 @@ impl<'g, T> Ptr<'g, T> {
     ///
     /// # Panics
     ///
-    /// Panics if this pointer is null.
+    /// Panics if this pointer is null, but only in debug mode.
     ///
     /// # Safety
     ///
@@ -1051,7 +1051,7 @@ impl<'g, T> Ptr<'g, T> {
     /// }
     /// ```
     pub unsafe fn into_owned(self) -> Owned<T> {
-        assert!(self.as_raw() != ptr::null(), "converting a null `Ptr` into `Owned`");
+        debug_assert!(self.as_raw() != ptr::null(), "converting a null `Ptr` into `Owned`");
         Owned::from_data(self.data)
     }
 
