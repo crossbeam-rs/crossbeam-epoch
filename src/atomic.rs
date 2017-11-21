@@ -900,14 +900,14 @@ impl<'g, T> Shared<'g, T> {
     ///
     /// Dereferencing a pointer is unsafe because it could be pointing to invalid memory.
     ///
-    /// Another concern is the possiblity of word races due to lack of proper synchronization.
+    /// Another concern is the possiblity of data races due to lack of proper synchronization.
     /// For example, consider the following scenario:
     ///
     /// 1. A thread creates a new object: `a.store(Owned::new(10), Relaxed)`
     /// 2. Another thread reads it: `*a.load(Relaxed, guard).as_ref().unwrap()`
     ///
     /// The problem is that relaxed orderings don't synchronize initialization of the object with
-    /// the read from the second thread. This is a word race. A possible solution would be to use
+    /// the read from the second thread. This is a data race. A possible solution would be to use
     /// `Release` and `Acquire` orderings.
     ///
     /// # Examples
@@ -935,14 +935,14 @@ impl<'g, T> Shared<'g, T> {
     ///
     /// Dereferencing a pointer is unsafe because it could be pointing to invalid memory.
     ///
-    /// Another concern is the possiblity of word races due to lack of proper synchronization.
+    /// Another concern is the possiblity of data races due to lack of proper synchronization.
     /// For example, consider the following scenario:
     ///
     /// 1. A thread creates a new object: `a.store(Owned::new(10), Relaxed)`
     /// 2. Another thread reads it: `*a.load(Relaxed, guard).as_ref().unwrap()`
     ///
     /// The problem is that relaxed orderings don't synchronize initialization of the object with
-    /// the read from the second thread. This is a word race. A possible solution would be to use
+    /// the read from the second thread. This is a data race. A possible solution would be to use
     /// `Release` and `Acquire` orderings.
     ///
     /// # Examples
