@@ -198,7 +198,7 @@ impl Drop for Guard {
     #[inline]
     fn drop(&mut self) {
         if let Some(local) = unsafe { self.local.as_ref() } {
-            Local::unpin(local);
+            local.unpin();
         }
     }
 }
