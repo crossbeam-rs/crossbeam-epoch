@@ -39,9 +39,6 @@ pub struct Garbage {
     func: Deferred,
 }
 
-unsafe impl Sync for Garbage {}
-unsafe impl Send for Garbage {}
-
 impl fmt::Debug for Garbage {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         write!(f, "garbage {{ ... }}")
@@ -50,7 +47,7 @@ impl fmt::Debug for Garbage {
 
 impl Garbage {
     /// Make a closure that will later be called.
-    pub fn new<F: FnOnce() + Send>(f: F) -> Self {
+    pub fn new<F: FnOnce()>(f: F) -> Self {
         Garbage { func: Deferred::new(move || f()) }
     }
 }
