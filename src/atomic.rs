@@ -89,19 +89,19 @@ fn low_bits<T>() -> usize {
     (1 << mem::align_of::<T>().trailing_zeros()) - 1
 }
 
-/// Given a tagged pointer `word`, returns the same pointer, but tagged with `tag`.
+/// Given a tagged pointer `data`, returns the same pointer, but tagged with `tag`.
 ///
 /// `tag` is truncated to fit into the unused bits of the pointer to `T`.
 #[inline]
-fn word_with_tag<T>(word: usize, tag: usize) -> usize {
-    (word & !low_bits::<T>()) | (tag & low_bits::<T>())
+fn data_with_tag<T>(data: usize, tag: usize) -> usize {
+    (data & !low_bits::<T>()) | (tag & low_bits::<T>())
 }
 
-/// Decomposes a tagged pointer `word` into the pointer and the tag.
+/// Decomposes a tagged pointer `data` into the pointer and the tag.
 #[inline]
-fn decompose_word<T>(word: usize) -> (*mut T, usize) {
-    let raw = (word & !low_bits::<T>()) as *mut T;
-    let tag = word & low_bits::<T>();
+fn decompose_data<T>(data: usize) -> (*mut T, usize) {
+    let raw = (data & !low_bits::<T>()) as *mut T;
+    let tag = data & low_bits::<T>();
     (raw, tag)
 }
 
@@ -115,7 +115,7 @@ fn decompose_word<T>(word: usize) -> (*mut T, usize) {
 ///
 /// [`Guard`]: struct.Guard.html
 pub struct Atomic<T> {
-    word: AtomicUsize,
+    data: AtomicUsize,
     _marker: PhantomData<*mut T>,
 }
 
@@ -123,10 +123,10 @@ unsafe impl<T: Send + Sync> Send for Atomic<T> {}
 unsafe impl<T: Send + Sync> Sync for Atomic<T> {}
 
 impl<T> Atomic<T> {
-    /// Returns a new atomic pointer pointing to the tagged pointer `word`.
-    fn from_word(word: usize) -> Self {
+    /// Returns a new atomic pointer pointing to the tagged pointer `data`.
+    fn from_data(data: usize) -> Self {
         Atomic {
-            word: AtomicUsize::new(word),
+            data: AtomicUsize::new(data),
             _marker: PhantomData,
         }
     }
@@ -143,7 +143,7 @@ impl<T> Atomic<T> {
     #[cfg(not(feature = "nightly"))]
     pub fn null() -> Self {
         Atomic {
-            word: ATOMIC_USIZE_INIT,
+            data: ATOMIC_USIZE_INIT,
             _marker: PhantomData,
         }
     }
@@ -160,7 +160,7 @@ impl<T> Atomic<T> {
     #[cfg(feature = "nightly")]
     pub const fn null() -> Self {
         Atomic {
-            word: ATOMIC_USIZE_INIT,
+            data: ATOMIC_USIZE_INIT,
             _marker: PhantomData,
         }
     }
@@ -188,8 +188,8 @@ impl<T> Atomic<T> {
     /// let a = Atomic::from_owned(Owned::new(1234));
     /// ```
     pub fn from_owned(owned: Owned<T>) -> Self {
-        let word = owned.into_word();
-        Self::from_word(word)
+        let data = owned.into_data();
+        Self::from_data(data)
     }
 
     /// Returns a new atomic pointer pointing to `ptr`.
@@ -202,7 +202,7 @@ impl<T> Atomic<T> {
     /// let a = Atomic::from_ptr(Shared::<i32>::null());
     /// ```
     pub fn from_ptr(ptr: Shared<T>) -> Self {
-        Self::from_word(ptr.into_word())
+        Self::from_data(ptr.into_data())
     }
 
     /// Returns a new atomic pointer pointing to `raw`.
@@ -216,7 +216,7 @@ impl<T> Atomic<T> {
     /// let a = Atomic::from_raw(ptr::null::<i32>());
     /// ```
     pub fn from_raw(raw: *const T) -> Self {
-        Self::from_word(raw as usize)
+        Self::from_data(raw as usize)
     }
 
     /// Loads a `Shared` from the atomic pointer.
@@ -237,7 +237,7 @@ impl<T> Atomic<T> {
     /// let p = a.load(SeqCst, guard);
     /// ```
     pub fn load<'g>(&self, ord: Ordering, _: &'g Guard) -> Shared<'g, T> {
-        unsafe { Shared::from_word(self.word.load(ord)) }
+        unsafe { Shared::from_data(self.data.load(ord)) }
     }
 
     /// Stores a `Shared` or `Owned` pointer into the atomic pointer.
@@ -258,7 +258,7 @@ impl<T> Atomic<T> {
     /// a.store(Owned::new(1234), SeqCst);
     /// ```
     pub fn store<'g, P: Pointer<T>>(&self, new: P, ord: Ordering) {
-        self.word.store(new.into_word(), ord);
+        self.data.store(new.into_data(), ord);
     }
 
     /// Stores a `Shared` or `Owned` pointer into the atomic pointer, returning the previous
@@ -280,7 +280,7 @@ impl<T> Atomic<T> {
     /// let p = a.swap(Shared::null(), SeqCst, guard);
     /// ```
     pub fn swap<'g, P: Pointer<T>>(&self, new: P, ord: Ordering, _: &'g Guard) -> Shared<'g, T> {
-        unsafe { Shared::from_word(self.word.swap(new.into_word(), ord)) }
+        unsafe { Shared::from_data(self.data.swap(new.into_data(), ord)) }
     }
 
     /// Stores the pointer `new` (either `Shared` or `Owned`) into the atomic pointer if the current
@@ -319,14 +319,14 @@ impl<T> Atomic<T> {
         O: CompareAndSetOrdering,
         P: Pointer<T>,
     {
-        let new = new.into_word();
-        self.word
-            .compare_exchange(current.into_word(), new, ord.success(), ord.failure())
-            .map(|_| unsafe { Shared::from_word(new) })
+        let new = new.into_data();
+        self.data
+            .compare_exchange(current.into_data(), new, ord.success(), ord.failure())
+            .map(|_| unsafe { Shared::from_data(new) })
             .map_err(|previous| unsafe {
                 CompareAndSetError {
-                    previous: Shared::from_word(previous),
-                    new: P::from_word(new),
+                    previous: Shared::from_data(previous),
+                    new: P::from_data(new),
                 }
             })
     }
@@ -388,14 +388,14 @@ impl<T> Atomic<T> {
         O: CompareAndSetOrdering,
         P: Pointer<T>,
     {
-        let new = new.into_word();
-        self.word
-            .compare_exchange_weak(current.into_word(), new, ord.success(), ord.failure())
-            .map(|_| unsafe { Shared::from_word(new) })
+        let new = new.into_data();
+        self.data
+            .compare_exchange_weak(current.into_data(), new, ord.success(), ord.failure())
+            .map(|_| unsafe { Shared::from_data(new) })
             .map_err(|previous| unsafe {
                 CompareAndSetError {
-                    previous: Shared::from_word(previous),
-                    new: P::from_word(new),
+                    previous: Shared::from_data(previous),
+                    new: P::from_data(new),
                 }
             })
     }
@@ -422,7 +422,7 @@ impl<T> Atomic<T> {
     /// assert_eq!(a.load(SeqCst, guard).tag(), 2);
     /// ```
     pub fn fetch_and<'g>(&self, val: usize, ord: Ordering, _: &'g Guard) -> Shared<'g, T> {
-        unsafe { Shared::from_word(self.word.fetch_and(val | !low_bits::<T>(), ord)) }
+        unsafe { Shared::from_data(self.data.fetch_and(val | !low_bits::<T>(), ord)) }
     }
 
     /// Bitwise "or" with the current tag.
@@ -447,7 +447,7 @@ impl<T> Atomic<T> {
     /// assert_eq!(a.load(SeqCst, guard).tag(), 3);
     /// ```
     pub fn fetch_or<'g>(&self, val: usize, ord: Ordering, _: &'g Guard) -> Shared<'g, T> {
-        unsafe { Shared::from_word(self.word.fetch_or(val & low_bits::<T>(), ord)) }
+        unsafe { Shared::from_data(self.data.fetch_or(val & low_bits::<T>(), ord)) }
     }
 
     /// Bitwise "xor" with the current tag.
@@ -472,14 +472,14 @@ impl<T> Atomic<T> {
     /// assert_eq!(a.load(SeqCst, guard).tag(), 2);
     /// ```
     pub fn fetch_xor<'g>(&self, val: usize, ord: Ordering, _: &'g Guard) -> Shared<'g, T> {
-        unsafe { Shared::from_word(self.word.fetch_xor(val & low_bits::<T>(), ord)) }
+        unsafe { Shared::from_data(self.data.fetch_xor(val & low_bits::<T>(), ord)) }
     }
 }
 
 impl<T> fmt::Debug for Atomic<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let word = self.word.load(Ordering::SeqCst);
-        let (raw, tag) = decompose_word::<T>(word);
+        let data = self.data.load(Ordering::SeqCst);
+        let (raw, tag) = decompose_data::<T>(data);
 
         f.debug_struct("Atomic")
             .field("raw", &raw)
@@ -490,8 +490,8 @@ impl<T> fmt::Debug for Atomic<T> {
 
 impl<T> fmt::Pointer for Atomic<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let word = self.word.load(Ordering::SeqCst);
-        let (raw, _) = decompose_word::<T>(word);
+        let data = self.data.load(Ordering::SeqCst);
+        let (raw, _) = decompose_data::<T>(data);
         fmt::Pointer::fmt(&raw, f)
     }
 }
@@ -502,8 +502,8 @@ impl<T> Clone for Atomic<T> {
     /// Note that a `Relaxed` load is used here. If you need synchronization, use it with other
     /// atomics or fences.
     fn clone(&self) -> Self {
-        let word = self.word.load(Ordering::Relaxed);
-        Atomic::from_word(word)
+        let data = self.data.load(Ordering::Relaxed);
+        Atomic::from_data(data)
     }
 }
 
@@ -540,10 +540,10 @@ impl<'g, T> From<Shared<'g, T>> for Atomic<T> {
 /// A trait for either `Owned` or `Shared` pointers.
 pub trait Pointer<T> {
     /// Returns the machine representation of the pointer.
-    fn into_word(self) -> usize;
+    fn into_data(self) -> usize;
 
-    /// Returns a new pointer pointing to the tagged pointer `word`.
-    unsafe fn from_word(word: usize) -> Self;
+    /// Returns a new pointer pointing to the tagged pointer `data`.
+    unsafe fn from_data(data: usize) -> Self;
 }
 
 /// An owned heap-allocated object.
@@ -553,28 +553,28 @@ pub trait Pointer<T> {
 /// The pointer must be properly aligned. Since it is aligned, a tag can be stored into the unused
 /// least significant bits of the address.
 pub struct Owned<T> {
-    word: usize,
+    data: usize,
     _marker: PhantomData<Box<T>>,
 }
 
 impl<T> Pointer<T> for Owned<T> {
     #[inline]
-    fn into_word(self) -> usize {
-        let word = self.word;
+    fn into_data(self) -> usize {
+        let data = self.data;
         mem::forget(self);
-        word
+        data
     }
 
-    /// Returns a new pointer pointing to the tagged pointer `word`.
+    /// Returns a new pointer pointing to the tagged pointer `data`.
     ///
     /// # Panics
     ///
-    /// Panics if the word is zero in debug mode.
+    /// Panics if the data is zero in debug mode.
     #[inline]
-    unsafe fn from_word(word: usize) -> Self {
-        debug_assert!(word != 0, "converting zero into `Owned`");
+    unsafe fn from_data(data: usize) -> Self {
+        debug_assert!(data != 0, "converting zero into `Owned`");
         Owned {
-            word: word,
+            data: data,
             _marker: PhantomData,
         }
     }
@@ -630,7 +630,7 @@ impl<T> Owned<T> {
     /// ```
     pub unsafe fn from_raw(raw: *mut T) -> Self {
         ensure_aligned(raw);
-        Self::from_word(raw as usize)
+        Self::from_data(raw as usize)
     }
 
     /// Converts the owned pointer into a [`Shared`].
@@ -647,7 +647,7 @@ impl<T> Owned<T> {
     ///
     /// [`Shared`]: struct.Shared.html
     pub fn into_ptr<'g>(self, _: &'g Guard) -> Shared<'g, T> {
-        unsafe { Shared::from_word(self.into_word()) }
+        unsafe { Shared::from_data(self.into_data()) }
     }
 
     /// Converts the owned pointer into a `Box`.
@@ -662,7 +662,7 @@ impl<T> Owned<T> {
     /// assert_eq!(*b, 1234);
     /// ```
     pub fn into_box(self) -> Box<T> {
-        let (raw, _) = decompose_word::<T>(self.into_word());
+        let (raw, _) = decompose_data::<T>(self.into_data());
         unsafe { Box::from_raw(raw) }
     }
 
@@ -676,7 +676,7 @@ impl<T> Owned<T> {
     /// assert_eq!(Owned::new(1234).tag(), 0);
     /// ```
     pub fn tag(&self) -> usize {
-        let (_, tag) = decompose_word::<T>(self.word);
+        let (_, tag) = decompose_data::<T>(self.data);
         tag
     }
 
@@ -694,14 +694,14 @@ impl<T> Owned<T> {
     /// assert_eq!(o.tag(), 5);
     /// ```
     pub fn with_tag(self, tag: usize) -> Self {
-        let word = self.into_word();
-        unsafe { Self::from_word(word_with_tag::<T>(word, tag)) }
+        let data = self.into_data();
+        unsafe { Self::from_data(data_with_tag::<T>(data, tag)) }
     }
 }
 
 impl<T> Drop for Owned<T> {
     fn drop(&mut self) {
-        let (raw, _) = decompose_word::<T>(self.word);
+        let (raw, _) = decompose_data::<T>(self.data);
         unsafe {
             drop(Box::from_raw(raw));
         }
@@ -710,7 +710,7 @@ impl<T> Drop for Owned<T> {
 
 impl<T> fmt::Debug for Owned<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let (raw, tag) = decompose_word::<T>(self.word);
+        let (raw, tag) = decompose_data::<T>(self.data);
 
         f.debug_struct("Owned")
             .field("raw", &raw)
@@ -729,14 +729,14 @@ impl<T> Deref for Owned<T> {
     type Target = T;
 
     fn deref(&self) -> &T {
-        let (raw, _) = decompose_word::<T>(self.word);
+        let (raw, _) = decompose_data::<T>(self.data);
         unsafe { &*raw }
     }
 }
 
 impl<T> DerefMut for Owned<T> {
     fn deref_mut(&mut self) -> &mut T {
-        let (raw, _) = decompose_word::<T>(self.word);
+        let (raw, _) = decompose_data::<T>(self.data);
         unsafe { &mut *raw }
     }
 }
@@ -784,7 +784,7 @@ impl<T> AsMut<T> for Owned<T> {
 /// The pointer must be properly aligned. Since it is aligned, a tag can be stored into the unused
 /// least significant bits of the address.
 pub struct Shared<'g, T: 'g> {
-    word: usize,
+    data: usize,
     _marker: PhantomData<(&'g (), *const T)>,
 }
 
@@ -793,7 +793,7 @@ unsafe impl<'g, T: Send> Send for Shared<'g, T> {}
 impl<'g, T> Clone for Shared<'g, T> {
     fn clone(&self) -> Self {
         Shared {
-            word: self.word,
+            data: self.data,
             _marker: PhantomData,
         }
     }
@@ -803,14 +803,14 @@ impl<'g, T> Copy for Shared<'g, T> {}
 
 impl<'g, T> Pointer<T> for Shared<'g, T> {
     #[inline]
-    fn into_word(self) -> usize {
-        self.word
+    fn into_data(self) -> usize {
+        self.data
     }
 
     #[inline]
-    unsafe fn from_word(word: usize) -> Self {
+    unsafe fn from_data(data: usize) -> Self {
         Shared {
-            word: word,
+            data: data,
             _marker: PhantomData,
         }
     }
@@ -829,7 +829,7 @@ impl<'g, T> Shared<'g, T> {
     /// ```
     pub fn null() -> Self {
         Shared {
-            word: 0,
+            data: 0,
             _marker: PhantomData,
         }
     }
@@ -851,7 +851,7 @@ impl<'g, T> Shared<'g, T> {
     pub fn from_raw(raw: *const T) -> Self {
         ensure_aligned(raw);
         Shared {
-            word: raw as usize,
+            data: raw as usize,
             _marker: PhantomData,
         }
     }
@@ -891,7 +891,7 @@ impl<'g, T> Shared<'g, T> {
     /// assert_eq!(p.as_raw(), raw);
     /// ```
     pub fn as_raw(&self) -> *const T {
-        let (raw, _) = decompose_word::<T>(self.word);
+        let (raw, _) = decompose_data::<T>(self.data);
         raw
     }
 
@@ -994,7 +994,7 @@ impl<'g, T> Shared<'g, T> {
             self.as_raw() != ptr::null(),
             "converting a null `Ptr` into `Owned`"
         );
-        Owned::from_word(self.word)
+        Owned::from_data(self.data)
     }
 
     /// Returns the tag stored within the pointer.
@@ -1011,7 +1011,7 @@ impl<'g, T> Shared<'g, T> {
     /// assert_eq!(p.tag(), 5);
     /// ```
     pub fn tag(&self) -> usize {
-        let (_, tag) = decompose_word::<T>(self.word);
+        let (_, tag) = decompose_data::<T>(self.data);
         tag
     }
 
@@ -1034,13 +1034,13 @@ impl<'g, T> Shared<'g, T> {
     /// assert_eq!(p1.as_raw(), p2.as_raw());
     /// ```
     pub fn with_tag(&self, tag: usize) -> Self {
-        unsafe { Self::from_word(word_with_tag::<T>(self.word, tag)) }
+        unsafe { Self::from_data(data_with_tag::<T>(self.data, tag)) }
     }
 }
 
 impl<'g, T> PartialEq<Shared<'g, T>> for Shared<'g, T> {
     fn eq(&self, other: &Self) -> bool {
-        self.word == other.word
+        self.data == other.data
     }
 }
 
@@ -1048,19 +1048,19 @@ impl<'g, T> Eq for Shared<'g, T> {}
 
 impl<'g, T> PartialOrd<Shared<'g, T>> for Shared<'g, T> {
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
-        self.word.partial_cmp(&other.word)
+        self.data.partial_cmp(&other.data)
     }
 }
 
 impl<'g, T> Ord for Shared<'g, T> {
     fn cmp(&self, other: &Self) -> cmp::Ordering {
-        self.word.cmp(&other.word)
+        self.data.cmp(&other.data)
     }
 }
 
 impl<'g, T> fmt::Debug for Shared<'g, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let (raw, tag) = decompose_word::<T>(self.word);
+        let (raw, tag) = decompose_data::<T>(self.data);
 
         f.debug_struct("Shared")
             .field("raw", &raw)
