@@ -39,6 +39,10 @@ pub struct Garbage {
     func: Deferred,
 }
 
+
+unsafe impl Sync for Garbage {}
+unsafe impl Send for Garbage {}
+
 impl fmt::Debug for Garbage {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         write!(f, "garbage {{ ... }}")
