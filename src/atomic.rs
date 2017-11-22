@@ -132,8 +132,8 @@ impl<T> Atomic<T> {
     /// let a = Atomic::<i32>::null();
     /// ```
     #[cfg(not(feature = "nightly"))]
-    pub fn null() -> Self {
-        Atomic {
+    pub fn null() -> Atomic<T> {
+        Self {
             data: ATOMIC_USIZE_INIT,
             _marker: PhantomData,
         }
@@ -149,8 +149,8 @@ impl<T> Atomic<T> {
     /// let a = Atomic::<i32>::null();
     /// ```
     #[cfg(feature = "nightly")]
-    pub const fn null() -> Self {
-        Atomic {
+    pub const fn null() -> Atomic<T> {
+        Self {
             data: ATOMIC_USIZE_INIT,
             _marker: PhantomData,
         }
@@ -165,7 +165,7 @@ impl<T> Atomic<T> {
     ///
     /// let a = Atomic::new(1234);
     /// ```
-    pub fn new(value: T) -> Self {
+    pub fn new(value: T) -> Atomic<T> {
         Self::from(Owned::new(value))
     }
 
@@ -569,7 +569,7 @@ impl<T> Owned<T> {
     ///
     /// let o = Owned::new(1234);
     /// ```
-    pub fn new(value: T) -> Self {
+    pub fn new(value: T) -> Owned<T> {
         Self::from(Box::new(value))
     }
 
@@ -590,7 +590,7 @@ impl<T> Owned<T> {
     ///
     /// let o = unsafe { Owned::from_raw(Box::into_raw(Box::new(1234))) };
     /// ```
-    pub unsafe fn from_raw(raw: *mut T) -> Self {
+    pub unsafe fn from_raw(raw: *mut T) -> Owned<T> {
         ensure_aligned(raw);
         Self::from_data(raw as usize)
     }
@@ -639,7 +639,7 @@ impl<T> Owned<T> {
     /// let o = o.with_tag(5);
     /// assert_eq!(o.tag(), 5);
     /// ```
-    pub fn with_tag(self, tag: usize) -> Self {
+    pub fn with_tag(self, tag: usize) -> Owned<T> {
         let data = self.into_data();
         unsafe { Self::from_data(data_with_tag::<T>(data, tag)) }
     }
@@ -805,7 +805,7 @@ impl<'g, T> Shared<'g, T> {
     /// let p = Shared::<i32>::null();
     /// assert!(p.is_null());
     /// ```
-    pub fn null() -> Self {
+    pub fn null() -> Shared<'g, T> {
         Shared {
             data: 0,
             _marker: PhantomData,
@@ -986,7 +986,7 @@ impl<'g, T> Shared<'g, T> {
     /// assert_eq!(p2.tag(), 5);
     /// assert_eq!(p1.as_raw(), p2.as_raw());
     /// ```
-    pub fn with_tag(&self, tag: usize) -> Self {
+    pub fn with_tag(&self, tag: usize) -> Shared<'g, T> {
         unsafe { Self::from_data(data_with_tag::<T>(self.data, tag)) }
     }
 }
