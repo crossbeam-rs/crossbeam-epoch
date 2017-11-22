@@ -946,7 +946,10 @@ impl<'g, T> Shared<'g, T> {
     /// }
     /// ```
     pub unsafe fn into_owned(self) -> Owned<T> {
-        debug_assert!(self.as_raw() != ptr::null(), "converting a null `Shared` into `Owned`");
+        debug_assert!(
+            self.as_raw() != ptr::null(),
+            "converting a null `Shared` into `Owned`"
+        );
         Owned::from_data(self.data)
     }
 
