@@ -181,7 +181,7 @@ impl<T, C: IsElement<T>> List<T, C> {
             match to.compare_and_set_weak(next, entry_ptr, Release, guard) {
                 Ok(_) => break,
                 // We lost the race or it failed spuriously. Update the successor and try again.
-                Err(err) => next = err.previous,
+                Err(err) => next = err.current,
             }
         }
     }
@@ -256,7 +256,7 @@ impl<'g, T: 'g, C: IsElement<T>> Iterator for Iter<'g, T, C> {
                     Err(err) => {
                         // We lost the race to delete the entry by a concurrent iterator. Set
                         // `self.curr` to the updated pointer, and report that we are stalled.
-                        self.curr = err.previous;
+                        self.curr = err.current;
                         return Some(Err(IterError::Stalled));
                     }
                 }
