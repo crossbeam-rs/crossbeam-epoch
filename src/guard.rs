@@ -200,6 +200,9 @@ impl Guard {
     /// that is created before an invocation of `safepoint()` and then survives after the
     /// invocation.
     ///
+    /// The current thread will be repinned only if this is the only active guard. Otherwise,
+    /// `safepoint()` will be just a no-op.
+    ///
     /// # Examples
     ///
     /// ```
