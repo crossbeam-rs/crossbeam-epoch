@@ -55,7 +55,7 @@ impl<T> Queue<T> {
         });
         unsafe {
             let guard = &unprotected();
-            let sentinel = sentinel.into_ptr(guard);
+            let sentinel = sentinel.into_shared(guard);
             q.head.store(sentinel, Relaxed);
             q.tail.store(sentinel, Relaxed);
             q
@@ -92,7 +92,7 @@ impl<T> Queue<T> {
             data: ManuallyDrop::new(t),
             next: Atomic::null(),
         });
-        let new = Owned::into_ptr(new, guard);
+        let new = Owned::into_shared(new, guard);
 
         loop {
             // We push onto the tail, so we'll start optimistically by looking there first.
