@@ -114,8 +114,8 @@ impl Global {
         for local in self.locals.iter(&guard) {
             match local {
                 Err(IterError::Stalled) => {
-                    // The iteration is stalled by another thread's iteration. Since that thread
-                    // also tries to advance the epoch, we leave the job to that thread.
+                    // A concurrent thread stalled this iteration. Since it also tries to advance
+                    // the epoch, we leave the job to that thread.
                     return global_epoch;
                 }
                 Ok(local) => {

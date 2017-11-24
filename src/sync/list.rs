@@ -112,16 +112,19 @@ pub struct Iter<'g, T: 'g, C: IsElement<T>> {
     /// The current entry.
     curr: Shared<'g, Entry>,
 
+    /// The list head, needed for restarting iteration.
+    head: &'g Atomic<Entry>,
+
     /// Logically, we store a borrow of an instance of `T` and
     /// use the type information from `C`.
     _marker: PhantomData<(&'g T, C)>,
 }
 
-/// An enum for iteration error.
+/// An error that occurs during iteration over the list.
 #[derive(PartialEq, Debug)]
 pub enum IterError {
-    /// Iterator was stalled by another iterator. Internally, the thread lost a race in deleting a
-    /// node by a concurrent thread.
+    /// A concurrent thread modified the state of the list at the same place that this iterator
+    /// was inspecting. Subsequent iteration will restart from the beginning of the list.
     Stalled,
 }
 
@@ -180,7 +183,8 @@ impl<T, C: IsElement<T>> List<T, C> {
             entry.next.store(next, Relaxed);
             match to.compare_and_set_weak(next, entry_ptr, Release, guard) {
                 Ok(_) => break,
-                // We lost the race or it failed spuriously. Update the successor and try again.
+                // We lost the race or weak CAS failed spuriously. Update the successor and try
+                // again.
                 Err(err) => next = err.current,
             }
         }
@@ -199,12 +203,11 @@ impl<T, C: IsElement<T>> List<T, C> {
     /// 3. The iteration may be aborted when it lost in a race condition. In this case, the winning
     ///    thread will continue to iterate over the same list.
     pub fn iter<'g>(&'g self, guard: &'g Guard) -> Iter<'g, T, C> {
-        let pred = &self.head;
-        let curr = pred.load(Acquire, guard);
         Iter {
             guard,
-            pred,
-            curr,
+            pred: &self.head,
+            curr: self.head.load(Acquire, guard),
+            head: &self.head,
             _marker: PhantomData,
         }
     }
@@ -238,30 +241,43 @@ impl<'g, T: 'g, C: IsElement<T>> Iterator for Iter<'g, T, C> {
                 // This entry was removed. Try unlinking it from the list.
                 let succ = succ.with_tag(0);
 
-                match self.pred.compare_and_set_weak(
+                if self.curr.tag() != 0 {
+                    // A concurrent thread deleted the predecessor node - we are stalled
+                    // and have to restart from `head`.
+                    self.pred = self.head;
+                    self.curr = self.head.load(Acquire, self.guard);
+
+                    return Some(Err(IterError::Stalled));
+                }
+
+                match self.pred.compare_and_set(
                     self.curr.with_tag(0),
                     succ,
                     Acquire,
                     self.guard,
                 ) {
                     Ok(_) => {
+                        // We succeeded in unlinking this element from the list, so we have to
+                        // schedule deallocation. Deferred drop is okay, because `list.delete()`
+                        // can only be called if `T: 'static`.
                         unsafe {
-                            // Deferred drop of `T` is scheduled here.
-                            // This is okay because `.delete()` can be called only if `T: 'static`.
                             let p = self.curr;
                             self.guard.defer(move || C::finalize(p.deref()));
                         }
+
+                        // Move over the removed by only advancing `curr`, not `pred`.
                         self.curr = succ;
+                        continue;
                     }
-                    Err(err) => {
-                        // We lost the race to delete the entry by a concurrent iterator. Set
-                        // `self.curr` to the updated pointer, and report that we are stalled.
-                        self.curr = err.current;
+                    Err(_) => {
+                        // A concurrent thread modified the predecessor node. Since it might've
+                        // been deleted, we need to restart from `head`.
+                        self.pred = self.head;
+                        self.curr = self.head.load(Acquire, self.guard);
+
                         return Some(Err(IterError::Stalled));
                     }
                 }
-
-                continue;
             }
 
             // Move one step forward.
