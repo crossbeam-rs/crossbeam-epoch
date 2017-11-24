@@ -31,13 +31,13 @@ use collector::Handle;
 use epoch::{AtomicEpoch, Epoch};
 use guard::{unprotected, Guard};
 use garbage::{Bag, Garbage};
-use sync::list::{List, Entry, IterError, Container};
+use sync::list::{List, Entry, IterError, IsElement};
 use sync::queue::Queue;
 
 /// The global data for a garbage collector.
 pub struct Global {
     /// The intrusive linked list of `Local`s.
-    locals: List<Local, LocalContainer>,
+    locals: List<Local>,
 
     /// The global queue of bags of deferred functions.
     queue: Queue<(Epoch, Bag)>,
@@ -336,21 +336,19 @@ impl Local {
     }
 }
 
-struct LocalContainer {}
-
-impl Container<Local> for LocalContainer {
-    fn container_of(entry: *const Entry) -> *const Local {
-        (entry as usize - offset_of!(Local, entry)) as *const _
+impl IsElement<Local> for Local {
+    fn entry_of(local: &Local) -> &Entry {
+        let entry_ptr = (local as *const Local as usize + offset_of!(Local, entry)) as *const Entry;
+        unsafe { &*entry_ptr }
     }
 
-    fn entry_of(local: *const Local) -> *const Entry {
-        (local as usize + offset_of!(Local, entry)) as *const _
+    unsafe fn element_of(entry: &Entry) -> &Local {
+        let local_ptr = (entry as *const Entry as usize - offset_of!(Local, entry)) as *const Local;
+        &*local_ptr
     }
 
-    fn finalize(entry: *const Entry) {
-        let local = Self::container_of(entry);
-        unsafe {
-            drop(Box::from_raw(local as *mut Local));
-        }
+    unsafe fn finalize(entry: &Entry) {
+        let local = Self::element_of(entry);
+        drop(Box::from_raw(local as *const Local as *mut Local));
     }
 }
