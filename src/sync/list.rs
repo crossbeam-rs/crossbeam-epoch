@@ -251,7 +251,7 @@ impl<'g, T: 'g, C: IsElement<T>> Iterator for Iter<'g, T, C> {
                 }
 
                 match self.pred.compare_and_set(
-                    self.curr.with_tag(0),
+                    self.curr,
                     succ,
                     Acquire,
                     self.guard,
