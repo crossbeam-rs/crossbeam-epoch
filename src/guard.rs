@@ -194,6 +194,38 @@ impl Guard {
         }
     }
 
+    /// Unpins and then pins the current thread.
+    ///
+    /// Since `&mut self` is given, we can statically deduce that there is no [`Shared`] pointer
+    /// that is created before an invocation of `safepoint()` and then survives after the
+    /// invocation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use crossbeam_epoch as epoch;
+    ///
+    /// let mut guard = epoch::pin();
+    /// {
+    ///     let a = epoch::Owned::new(42u64).into_shared(&guard);
+    ///     unsafe { guard.defer(move || a.into_owned()) };
+    /// }
+    /// // `a` should not survive.
+    /// guard.safepoint();
+    /// {
+    ///     let b = epoch::Owned::new(42u64).into_shared(&guard);
+    ///     unsafe { guard.defer(move || b.into_owned()) };
+    /// }
+    /// guard.flush();
+    /// ```
+    ///
+    /// [`Shared`]: struct.Shared.html
+    pub fn safepoint(&mut self) {
+        if let Some(local) = unsafe { self.local.as_ref() } {
+            local.repin();
+        }
+    }
+
     /// Temporarily unpins the thread, executes the given function and then re-pins the thread.
     ///
     /// This method is useful when you need to perform a long-running operation (e.g. sleeping)
@@ -203,10 +235,6 @@ impl Guard {
     ///
     /// If this method is called from an [`unprotected`] guard, then the passed function is called
     /// directly without unpinning the thread.
-    ///
-    /// # Examples
-    ///
-    /// ```
     /// use crossbeam_epoch::{self as epoch, Atomic};
     /// use std::sync::atomic::Ordering::SeqCst;
     /// use std::thread;

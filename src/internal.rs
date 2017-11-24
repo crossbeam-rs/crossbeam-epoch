@@ -21,7 +21,7 @@ use core::mem::{self, ManuallyDrop};
 use core::num::Wrapping;
 use core::ptr;
 use core::sync::atomic;
-use core::sync::atomic::Ordering::{Acquire, Relaxed, Release, SeqCst};
+use core::sync::atomic::Ordering;
 use alloc::boxed::Box;
 use alloc::arc::Arc;
 
@@ -63,10 +63,10 @@ impl Global {
 
     /// Pushes the bag into the global queue and replaces the bag with a new empty bag.
     pub fn push_bag(&self, bag: &mut Bag, guard: &Guard) {
-        let epoch = self.epoch.load(Relaxed);
+        let epoch = self.epoch.load(Ordering::Relaxed);
         let bag = mem::replace(bag, Bag::new());
 
-        atomic::fence(SeqCst);
+        atomic::fence(Ordering::SeqCst);
 
         self.queue.push((epoch, bag), guard);
     }
@@ -106,8 +106,8 @@ impl Global {
     /// `try_advance()` is annotated `#[cold]` because it is rarely called.
     #[cold]
     pub fn try_advance(&self, guard: &Guard) -> Epoch {
-        let global_epoch = self.epoch.load(Relaxed);
-        atomic::fence(SeqCst);
+        let global_epoch = self.epoch.load(Ordering::Relaxed);
+        atomic::fence(Ordering::SeqCst);
 
         // TODO(stjepang): `Local`s are stored in a linked list because linked lists are fairly
         // easy to implement in a lock-free manner. However, traversal can be slow due to cache
@@ -121,7 +121,7 @@ impl Global {
                     return global_epoch;
                 }
                 Ok(local) => {
-                    let local_epoch = local.epoch.load(Relaxed);
+                    let local_epoch = local.epoch.load(Ordering::Relaxed);
 
                     // If the participant was pinned in a different epoch, we cannot advance the
                     // global epoch just yet.
@@ -131,7 +131,7 @@ impl Global {
                 }
             }
         }
-        atomic::fence(Acquire);
+        atomic::fence(Ordering::Acquire);
 
         // All pinned participants were pinned in the current global epoch.
         // Now let's advance the global epoch...
@@ -141,7 +141,7 @@ impl Global {
         // called from a thread that was pinned in `global_epoch`, and the global epoch cannot be
         // advanced two steps ahead of it.
         let new_epoch = global_epoch.successor();
-        self.epoch.store(new_epoch, Release);
+        self.epoch.store(new_epoch, Ordering::Release);
         new_epoch
     }
 }
@@ -231,6 +231,30 @@ impl Local {
         self.global().collect(guard);
     }
 
+    /// Updates the `Local`'s epoch, and then issues a `SeqCst` fence.  Called by `Self::pin()` and
+    /// `Self::repin()`.
+    #[inline]
+    fn update_epoch(&self, current: Epoch, new: Epoch, ordering: Ordering) {
+        // Now we must store `new` into `self.epoch` and execute a `SeqCst` fence.  The fence makes
+        // sure that any future loads from `Atomic`s will not happen before this store.
+        if cfg!(any(target_arch = "x86", target_arch = "x86_64")) {
+            // HACK(stjepang): On x86 architectures there are two different ways of executing a
+            // `SeqCst` fence.
+            //
+            // 1. `atomic::fence(SeqCst)`, which compiles into a `mfence` instruction.
+            // 2. `_.compare_and_swap(_, _, SeqCst)`, which compiles into a `lock cmpxchg`
+            // instruction.
+            //
+            // Both instructions have the effect of a full barrier, but benchmarks have shown that
+            // the second one makes pinning faster in this particular case.
+            let previous = self.epoch.compare_and_swap(current, new, Ordering::SeqCst);
+            debug_assert_eq!(current, previous, "participant was expected to be unpinned");
+        } else {
+            self.epoch.store(new, ordering);
+            atomic::fence(Ordering::SeqCst);
+        }
+    }
+
     /// Pins the `Local`.
     #[inline]
     pub fn pin(&self) -> Guard {
@@ -240,29 +264,10 @@ impl Local {
         self.guard_count.set(guard_count.checked_add(1).unwrap());
 
         if guard_count == 0 {
-            let global_epoch = self.global().epoch.load(Relaxed);
+            let global_epoch = self.global().epoch.load(Ordering::Relaxed);
             let new_epoch = global_epoch.pinned();
 
-            // Now we must store `new_epoch` into `self.epoch` and execute a `SeqCst` fence.
-            // The fence makes sure that any future loads from `Atomic`s will not happen before
-            // this store.
-            if cfg!(any(target_arch = "x86", target_arch = "x86_64")) {
-                // HACK(stjepang): On x86 architectures there are two different ways of executing
-                // a `SeqCst` fence.
-                //
-                // 1. `atomic::fence(SeqCst)`, which compiles into a `mfence` instruction.
-                // 2. `_.compare_and_swap(_, _, SeqCst)`, which compiles into a `lock cmpxchg`
-                //    instruction.
-                //
-                // Both instructions have the effect of a full barrier, but benchmarks have shown
-                // that the second one makes pinning faster in this particular case.
-                let current = Epoch::starting();
-                let previous = self.epoch.compare_and_swap(current, new_epoch, SeqCst);
-                debug_assert_eq!(current, previous, "participant was expected to be unpinned");
-            } else {
-                self.epoch.store(new_epoch, Relaxed);
-                atomic::fence(SeqCst);
-            }
+            self.update_epoch(Epoch::starting(), new_epoch, Ordering::Relaxed);
 
             // Increment the pin counter.
             let count = self.pin_count.get();
@@ -285,10 +290,26 @@ impl Local {
         self.guard_count.set(guard_count - 1);
 
         if guard_count == 1 {
-            self.epoch.store(Epoch::starting(), Release);
+            self.epoch.store(Epoch::starting(), Ordering::Release);
 
             if self.handle_count.get() == 0 {
                 self.finalize();
+            }
+        }
+    }
+
+    /// Unpins and then pins the `Local`.
+    #[inline]
+    pub fn repin(&self) {
+        let guard_count = self.guard_count.get();
+
+        // Update the local epoch only if there's only one guard.
+        if guard_count == 1 {
+            let epoch = self.epoch.load(Ordering::Relaxed);
+            let global_epoch = self.global().epoch.load(Ordering::Relaxed);
+
+            if epoch != global_epoch {
+                self.update_epoch(epoch, global_epoch, Ordering::Release);
             }
         }
     }
