@@ -13,13 +13,9 @@ categories = ["concurrency", "memory-management"]
 
 [features]
 default = ["use_std"]
-<<<<<<< HEAD
-use_std = ["lazy_static", "crossbeam-utils/use_std"]
-=======
->>>>>>> Add sanitization tests
 nightly = ["arrayvec/use_union"]
 sanitize = []
-use_std = ["lazy_static"]
+use_std = ["lazy_static", "crossbeam-utils/use_std"]
 
 [dependencies]
 arrayvec = { version = "0.4", default-features = false }

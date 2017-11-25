@@ -121,7 +121,6 @@ impl Global {
                     return global_epoch;
                 }
                 Ok(local) => {
-                    let local_epoch = local.epoch.load(Ordering::Relaxed);
                     let local_epoch = if cfg!(feature = "sanitize") {
                         // HACK(stjepang): This is necessary because thread sanitizer doesn't
                         // understand fences.
