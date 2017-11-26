@@ -13,7 +13,7 @@ categories = ["concurrency", "memory-management"]
 
 [features]
 default = ["use_std"]
-use_std = ["lazy_static"]
+use_std = ["lazy_static", "crossbeam-utils/use_std"]
 nightly = ["arrayvec/use_union"]
 strict_gc = []
 
