@@ -23,10 +23,7 @@ use core::ptr;
 use core::sync::atomic;
 use core::sync::atomic::Ordering::{Acquire, Relaxed, Release, SeqCst};
 use alloc::boxed::Box;
-#[cfg(feature = "nightly")]
 use alloc::arc::Arc;
-#[cfg(not(feature = "nightly"))]
-use alloc::sync::Arc;
 
 use crossbeam_utils::cache_padded::CachePadded;
 

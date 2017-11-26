@@ -13,10 +13,7 @@
 /// handle.pin().flush();
 /// ```
 
-#[cfg(feature = "nightly")]
 use alloc::arc::Arc;
-#[cfg(not(feature = "nightly"))]
-use alloc::sync::Arc;
 
 use internal::{Global, Local};
 use guard::Guard;
