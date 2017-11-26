@@ -194,36 +194,38 @@ impl Guard {
         }
     }
 
-    /// Unpins and then pins the current thread.
+    /// Unpins and then immediately re-pins the thread.
     ///
-    /// Since `&mut self` is given, we can statically deduce that there is no [`Shared`] pointer
-    /// that is created before an invocation of `safepoint()` and then survives after the
-    /// invocation.
+    /// This method is useful when you don't want delay the advancement of the global epoch by
+    /// holding an old epoch. For safety, you should not maintain any guard-based reference across
+    /// the call (the latter is enforced by `&mut self`). The thread will only be repinned if this
+    /// is the only active guard for the current thread.
     ///
-    /// The current thread will be repinned only if this is the only active guard. Otherwise,
-    /// `safepoint()` will be just a no-op.
+    /// If this method is called from an [`unprotected`] guard, then the call will be just no-op.
     ///
     /// # Examples
     ///
     /// ```
-    /// use crossbeam_epoch as epoch;
+    /// use crossbeam_epoch::{self as epoch, Atomic};
+    /// use std::sync::atomic::Ordering::SeqCst;
+    /// use std::thread;
+    /// use std::time::Duration;
     ///
+    /// let a = Atomic::new(777);
     /// let mut guard = epoch::pin();
     /// {
-    ///     let a = epoch::Owned::new(42u64).into_shared(&guard);
-    ///     unsafe { guard.defer(move || a.into_owned()) };
+    ///     let p = a.load(SeqCst, &guard);
+    ///     assert_eq!(unsafe { p.as_ref() }, Some(&777));
     /// }
-    /// // `a` should not survive.
-    /// guard.safepoint();
+    /// guard.repin();
     /// {
-    ///     let b = epoch::Owned::new(42u64).into_shared(&guard);
-    ///     unsafe { guard.defer(move || b.into_owned()) };
+    ///     let p = a.load(SeqCst, &guard);
+    ///     assert_eq!(unsafe { p.as_ref() }, Some(&777));
     /// }
-    /// guard.flush();
     /// ```
     ///
-    /// [`Shared`]: struct.Shared.html
-    pub fn safepoint(&mut self) {
+    /// [`unprotected`]: fn.unprotected.html
+    pub fn repin(&mut self) {
         if let Some(local) = unsafe { self.local.as_ref() } {
             local.repin();
         }
