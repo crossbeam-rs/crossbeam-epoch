@@ -240,6 +240,10 @@ impl Guard {
     ///
     /// If this method is called from an [`unprotected`] guard, then the passed function is called
     /// directly without unpinning the thread.
+    ///
+    /// # Examples
+    ///
+    /// ```
     /// use crossbeam_epoch::{self as epoch, Atomic};
     /// use std::sync::atomic::Ordering::SeqCst;
     /// use std::thread;
