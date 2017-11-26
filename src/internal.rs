@@ -231,30 +231,6 @@ impl Local {
         self.global().collect(guard);
     }
 
-    /// Updates the `Local`'s epoch, and then issues a `SeqCst` fence.  Called by `Self::pin()` and
-    /// `Self::repin()`.
-    #[inline]
-    fn update_epoch(&self, current: Epoch, new: Epoch, ordering: Ordering) {
-        // Now we must store `new` into `self.epoch` and execute a `SeqCst` fence.  The fence makes
-        // sure that any future loads from `Atomic`s will not happen before this store.
-        if cfg!(any(target_arch = "x86", target_arch = "x86_64")) {
-            // HACK(stjepang): On x86 architectures there are two different ways of executing a
-            // `SeqCst` fence.
-            //
-            // 1. `atomic::fence(SeqCst)`, which compiles into a `mfence` instruction.
-            // 2. `_.compare_and_swap(_, _, SeqCst)`, which compiles into a `lock cmpxchg`
-            // instruction.
-            //
-            // Both instructions have the effect of a full barrier, but benchmarks have shown that
-            // the second one makes pinning faster in this particular case.
-            let previous = self.epoch.compare_and_swap(current, new, Ordering::SeqCst);
-            debug_assert_eq!(current, previous, "participant was expected to be unpinned");
-        } else {
-            self.epoch.store(new, ordering);
-            atomic::fence(Ordering::SeqCst);
-        }
-    }
-
     /// Pins the `Local`.
     #[inline]
     pub fn pin(&self) -> Guard {
@@ -267,7 +243,26 @@ impl Local {
             let global_epoch = self.global().epoch.load(Ordering::Relaxed);
             let new_epoch = global_epoch.pinned();
 
-            self.update_epoch(Epoch::starting(), new_epoch, Ordering::Relaxed);
+            // Now we must store `new_epoch` into `self.epoch` and execute a `SeqCst` fence.
+            // The fence makes sure that any future loads from `Atomic`s will not happen before
+            // this store.
+            if cfg!(any(target_arch = "x86", target_arch = "x86_64")) {
+                // HACK(stjepang): On x86 architectures there are two different ways of executing
+                // a `SeqCst` fence.
+                //
+                // 1. `atomic::fence(SeqCst)`, which compiles into a `mfence` instruction.
+                // 2. `_.compare_and_swap(_, _, SeqCst)`, which compiles into a `lock cmpxchg`
+                //    instruction.
+                //
+                // Both instructions have the effect of a full barrier, but benchmarks have shown
+                // that the second one makes pinning faster in this particular case.
+                let current = Epoch::starting();
+                let previous = self.epoch.compare_and_swap(current, new_epoch, Ordering::SeqCst);
+                debug_assert_eq!(current, previous, "participant was expected to be unpinned");
+            } else {
+                self.epoch.store(new_epoch, Ordering::Relaxed);
+                atomic::fence(Ordering::SeqCst);
+            }
 
             // Increment the pin counter.
             let count = self.pin_count.get();
@@ -308,8 +303,15 @@ impl Local {
             let epoch = self.epoch.load(Ordering::Relaxed);
             let global_epoch = self.global().epoch.load(Ordering::Relaxed);
 
+            // Update the local epoch only if the global epoch is greater than the local epoch.
             if epoch != global_epoch {
-                self.update_epoch(epoch, global_epoch, Ordering::Release);
+                // We store the new epoch with `Release` because we need to ensure any memory
+                // accesses from the previous epoch do not leak into the new one.
+                self.epoch.store(global_epoch, Ordering::Release);
+
+                // However, we don't need a following `SeqCst` fence, because it is safe for memory
+                // accesses from the new epoch to be executed before updating the local epoch.  At
+                // worse, other threads will see the new epoch late and delay GC slightly.
             }
         }
     }
