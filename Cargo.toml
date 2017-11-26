@@ -12,8 +12,8 @@ keywords = ["lock-free", "rcu", "atomic", "garbage"]
 categories = ["concurrency", "memory-management"]
 
 [features]
-default = ["std"]
-std = ["lazy_static"]
+default = ["use_std"]
+use_std = ["lazy_static"]
 nightly = ["arrayvec/use_union"]
 strict_gc = []
 

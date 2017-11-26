@@ -58,7 +58,7 @@
 #![cfg_attr(feature = "nightly", feature(alloc))]
 #![cfg_attr(not(test), no_std)]
 
-#[cfg(all(not(test), feature = "std"))]
+#[cfg(all(not(test), feature = "use_std"))]
 #[macro_use]
 extern crate std;
 #[cfg(test)]
@@ -77,7 +77,7 @@ mod alloc {
 
 extern crate arrayvec;
 extern crate crossbeam_utils;
-#[cfg(feature = "std")]
+#[cfg(feature = "use_std")]
 #[macro_use]
 extern crate lazy_static;
 #[macro_use]
@@ -85,7 +85,7 @@ extern crate memoffset;
 
 mod atomic;
 mod collector;
-#[cfg(feature = "std")]
+#[cfg(feature = "use_std")]
 mod default;
 mod deferred;
 mod epoch;
@@ -96,6 +96,6 @@ mod sync;
 
 pub use self::atomic::{Atomic, CompareAndSetError, CompareAndSetOrdering, Owned, Shared};
 pub use self::guard::{unprotected, Guard};
-#[cfg(feature = "std")]
+#[cfg(feature = "use_std")]
 pub use self::default::{default_handle, is_pinned, pin};
 pub use self::collector::{Collector, Handle};
