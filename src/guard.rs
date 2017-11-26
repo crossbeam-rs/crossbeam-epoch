@@ -237,16 +237,12 @@ impl Guard {
         }
 
         // Ensure the Guard is re-pinned even if the function panics
-        struct PanicGuard(*const Local);
-        impl Drop for PanicGuard {
-            fn drop(&mut self) {
-                if let Some(local) = unsafe { self.0.as_ref() } {
-                    mem::forget(local.pin());
-                    local.release_handle();
-                }
+        defer! {
+            if let Some(local) = unsafe { self.local.as_ref() } {
+                mem::forget(local.pin());
+                local.release_handle();
             }
         }
-        let _guard = PanicGuard(self.local);
 
         f()
     }
