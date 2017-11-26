@@ -197,8 +197,9 @@ impl Guard {
     /// Temporarily unpins the thread, executes the given function and then re-pins the thread.
     ///
     /// This method is useful when you need to perform a long-running operation (e.g. sleeping)
-    /// and don't need to maintain any guard-based reference across the call. The thread will only
-    /// be unpinned if this is the only active guard for the current thread.
+    /// and don't need to maintain any guard-based reference across the call (the latter is enforced
+    /// by `&mut self`). The thread will only be unpinned if this is the only active guard for the
+    /// current thread.
     ///
     /// If this method is called from an [`unprotected`] guard, then the passed function is called
     /// directly without unpinning the thread.
@@ -217,7 +218,7 @@ impl Guard {
     ///     let p = a.load(SeqCst, &guard);
     ///     assert_eq!(unsafe { p.as_ref() }, Some(&777));
     /// }
-    /// guard.unpin_for(|| thread::sleep(Duration::from_millis(50)));
+    /// guard.repin_after(|| thread::sleep(Duration::from_millis(50)));
     /// {
     ///     let p = a.load(SeqCst, &guard);
     ///     assert_eq!(unsafe { p.as_ref() }, Some(&777));
@@ -225,7 +226,7 @@ impl Guard {
     /// ```
     ///
     /// [`unprotected`]: fn.unprotected.html
-    pub fn unpin_for<F, R>(&mut self, f: F) -> R
+    pub fn repin_after<F, R>(&mut self, f: F) -> R
     where
         F: FnOnce() -> R,
     {
