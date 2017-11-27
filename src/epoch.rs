@@ -7,7 +7,6 @@
 //! If an object became garbage in some epoch, then we can be sure that after two advancements no
 //! participant will hold a reference to it. That is the crux of safe memory reclamation.
 
-use core::cmp;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 /// An epoch that can be marked as pinned or unpinned.
@@ -27,33 +26,28 @@ impl Epoch {
         Self::default()
     }
 
-    /// Returns the number of steps between two epochs.
-    ///
-    /// An epoch is internally represented as an integer that wraps around at some unspecified
-    /// point. The returned distance between two epochs is the minimum number of steps required to
-    /// go from `self` to `other` or go from `other` to `self`.
+    /// Wrapping (modular) subtraction. Computes `self - rhs`,
+    /// wrapping around at the boundary of the type.
     #[inline]
-    pub fn distance(&self, other: Self) -> usize {
-        let (e1, _) = self.decompose();
-        let (e2, _) = other.decompose();
-        cmp::min(e1.wrapping_sub(e2), e2.wrapping_sub(e1))
+    pub fn wrapping_sub(self, rhs: Self) -> usize {
+        self.data.wrapping_sub(rhs.data)
     }
 
     /// Returns `true` if the epoch is marked as pinned.
     #[inline]
-    pub fn is_pinned(&self) -> bool {
-        self.decompose().1
+    pub fn is_pinned(self) -> bool {
+        (self.data & 1) == 1
     }
 
     /// Returns the same epoch, but marked as pinned.
     #[inline]
-    pub fn pinned(&self) -> Epoch {
+    pub fn pinned(self) -> Epoch {
         Epoch { data: self.data | 1 }
     }
 
     /// Returns the same epoch, but marked as unpinned.
     #[inline]
-    pub fn unpinned(&self) -> Epoch {
+    pub fn unpinned(self) -> Epoch {
         Epoch { data: self.data & !1 }
     }
 
@@ -61,14 +55,8 @@ impl Epoch {
     ///
     /// The returned epoch will be marked as pinned only if the previous one was as well.
     #[inline]
-    pub fn successor(&self) -> Epoch {
+    pub fn successor(self) -> Epoch {
         Epoch { data: self.data.wrapping_add(2) }
-    }
-
-    /// Decomposes the internal data into the epoch and the pin state.
-    #[inline]
-    fn decompose(&self) -> (usize, bool) {
-        (self.data >> 1, (self.data & 1) == 1)
     }
 }
 
