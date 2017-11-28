@@ -88,7 +88,13 @@ impl Global {
             global_epoch.distance(item.0) > 1
         };
 
-        for _ in 0..Self::COLLECT_STEPS {
+        let steps = if cfg!(feature = "sanitize") {
+            usize::max_value()
+        } else {
+            Self::COLLECT_STEPS
+        };
+
+        for _ in 0..steps {
             match self.queue.try_pop_if(&condition, guard) {
                 None => break,
                 Some(bag) => drop(bag),
@@ -121,13 +127,7 @@ impl Global {
                     return global_epoch;
                 }
                 Ok(local) => {
-                    let local_epoch = if cfg!(feature = "sanitize") {
-                        // HACK(stjepang): This is necessary because thread sanitizer doesn't
-                        // understand fences.
-                        local.epoch.load(Ordering::Acquire)
-                    } else {
-                        local.epoch.load(Ordering::Relaxed)
-                    };
+                    let local_epoch = local.epoch.load(Ordering::Relaxed);
 
                     // If the participant was pinned in a different epoch, we cannot advance the
                     // global epoch just yet.
@@ -349,12 +349,20 @@ impl Local {
         debug_assert_eq!(self.guard_count.get(), 0);
         debug_assert_eq!(self.handle_count.get(), 0);
 
+        // Temporarily increment handle count. This is required so that the following call to `pin`
+        // doesn't call `finalize` again.
+        self.handle_count.set(1);
+        unsafe {
+            // Pin and move the local bag into the global queue.
+            let guard = &self.pin();
+            self.global().push_bag(&mut *self.bag.get(), guard);
+        }
+        // Revert the handle count back to zero.
+        self.handle_count.set(0);
+
         unsafe {
             // Take the reference to the `Global` out of this `Local`.
             let global: Arc<Global> = ptr::read(&**self.global.get());
-
-            // Move the local bag into the global queue.
-            global.push_bag(&mut *self.bag.get(), &unprotected());
 
             // Mark this node in the linked list as deleted.
             self.entry.delete(&unprotected());
