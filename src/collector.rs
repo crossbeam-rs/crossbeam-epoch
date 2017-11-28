@@ -169,7 +169,7 @@ mod tests {
                             collector.global.collect(guard);
                             let after = collector.global.epoch.load(Ordering::Relaxed);
 
-                            assert!(after.wrapping_sub(before) <= 4);
+                            assert!(after.wrapping_sub(before) <= 2);
                         }
                     })
                 })

@@ -26,11 +26,12 @@ impl Epoch {
         Self::default()
     }
 
-    /// Wrapping (modular) subtraction. Computes `self - rhs`,
-    /// wrapping around at the boundary of the type.
-    #[inline]
-    pub fn wrapping_sub(self, rhs: Self) -> usize {
-        self.data.wrapping_sub(rhs.data)
+    /// Returns the number of epochs `self` is ahead of `rhs`.
+    ///
+    /// Internally, epochs are represented as numbers in the range `(isize::MIN / 2) .. (isize::MAX
+    /// / 2)`, so the returned distance will be in the same interval.
+    pub fn wrapping_sub(self, rhs: Self) -> isize {
+        (self.data & !1).wrapping_sub(rhs.data & !1) as isize >> 1
     }
 
     /// Returns `true` if the epoch is marked as pinned.

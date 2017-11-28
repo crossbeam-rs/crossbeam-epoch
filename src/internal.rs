@@ -85,7 +85,7 @@ impl Global {
         let condition = |item: &(Epoch, Bag)| {
             // A pinned participant can witness at most one epoch advancement. Therefore, any bag
             // that is within one epoch of the current one cannot be destroyed yet.
-            global_epoch.wrapping_sub(item.0) >= 4
+            global_epoch.wrapping_sub(item.0) >= 2
         };
 
         for _ in 0..Self::COLLECT_STEPS {
