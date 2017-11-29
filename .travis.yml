@@ -43,7 +43,7 @@ script:
 
   - |
     if [[ $TRAVIS_RUST_VERSION == nightly ]]; then
-      ASAN_OPTIONS="detect_odr_violation=0" \
+      ASAN_OPTIONS="detect_odr_violation=0 detect_leaks=0" \
       RUSTFLAGS="-Z sanitizer=address" \
       cargo run \
         --target x86_64-unknown-linux-gnu \
@@ -53,7 +53,7 @@ script:
 
   - |
     if [[ $TRAVIS_RUST_VERSION == nightly ]]; then
-      ASAN_OPTIONS="detect_odr_violation=0" \
+      ASAN_OPTIONS="detect_odr_violation=0 detect_leaks=0" \
       RUSTFLAGS="-Z sanitizer=address" \
       cargo run \
         --release \
