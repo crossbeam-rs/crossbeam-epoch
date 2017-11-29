@@ -353,7 +353,8 @@ impl Local {
         // doesn't call `finalize` again.
         self.handle_count.set(1);
         unsafe {
-            // Pin and move the local bag into the global queue.
+            // Pin and move the local bag into the global queue. It's important that `push_bag`
+            // doesn't defer destruction on any new garbage.
             let guard = &self.pin();
             self.global().push_bag(&mut *self.bag.get(), guard);
         }
@@ -361,7 +362,9 @@ impl Local {
         self.handle_count.set(0);
 
         unsafe {
-            // Take the reference to the `Global` out of this `Local`.
+            // Take the reference to the `Global` out of this `Local`. Since we're not protected
+            // by a guard at this time, it's crucial that the reference is read before marking the
+            // `Local` as deleted.
             let global: Arc<Global> = ptr::read(&**self.global.get());
 
             // Mark this node in the linked list as deleted.
