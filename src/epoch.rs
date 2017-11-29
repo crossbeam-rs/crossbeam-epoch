@@ -31,7 +31,10 @@ impl Epoch {
     /// Internally, epochs are represented as numbers in the range `(isize::MIN / 2) .. (isize::MAX
     /// / 2)`, so the returned distance will be in the same interval.
     pub fn wrapping_sub(self, rhs: Self) -> isize {
-        (self.data & !1).wrapping_sub(rhs.data & !1) as isize >> 1
+        // The result is the same with `(self.data & !1).wrapping_sub(rhs.data & !1) as isize >> 1`,
+        // because the possible difference of LSB in `(self.data & !1).wrapping_sub(rhs.data & !1)`
+        // will be ignored in the shift operation.
+        self.data.wrapping_sub(rhs.data & !1) as isize >> 1
     }
 
     /// Returns `true` if the epoch is marked as pinned.
