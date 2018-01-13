@@ -73,10 +73,24 @@ use internal::Local;
 ///
 /// [`pin`]: fn.pin.html
 pub struct Guard {
-    pub(crate) local: *const Local,
+    local: *const Local,
 }
 
 impl Guard {
+    /// Creates a new guard from a pointer to `Local`.
+    ///
+    /// # Safety
+    ///
+    /// The `local` should be a valid pointer created by `Local::register()`.
+    pub unsafe fn new(local: *const Local) -> Guard {
+        Guard { local: local }
+    }
+
+    /// Accesses the internal pointer to `Local`.
+    pub unsafe fn get_local(&self) -> *const Local {
+        self.local
+    }
+
     /// Stores a function so that it can be executed at some point after all currently pinned
     /// threads get unpinned.
     ///
@@ -353,17 +367,24 @@ impl Clone for Guard {
 /// is very helpful.
 ///
 /// ```
-/// use crossbeam_epoch::{self as epoch, Atomic};
-/// use std::mem::ManuallyDrop;
+/// extern crate crossbeam_epoch as epoch;
+/// #[cfg(feature = "manually_drop")]
+/// mod nodrop {
+///     pub use std::mem::ManuallyDrop as NoDrop;
+/// }
+/// #[cfg(not(feature = "manually_drop"))]
+/// extern crate nodrop;
+///
+/// use std::ptr;
 /// use std::sync::atomic::Ordering::Relaxed;
 ///
 /// struct Stack<T> {
-///     head: Atomic<Node<T>>,
+///     head: epoch::Atomic<Node<T>>,
 /// }
 ///
 /// struct Node<T> {
-///     data: ManuallyDrop<T>,
-///     next: Atomic<Node<T>>,
+///     data: nodrop::NoDrop<T>,
+///     next: epoch::Atomic<Node<T>>,
 /// }
 ///
 /// impl<T> Drop for Stack<T> {
@@ -378,7 +399,8 @@ impl Clone for Guard {
 ///
 ///                 // Take ownership of the node, then drop its data and deallocate it.
 ///                 let mut o = node.into_owned();
-///                 ManuallyDrop::drop(&mut o.data);
+///                 let data = nodrop::NoDrop::into_inner(ptr::read(&o.data));
+///                 drop(data);
 ///                 drop(o);
 ///
 ///                 node = next;
