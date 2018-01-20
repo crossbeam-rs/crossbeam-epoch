@@ -82,11 +82,13 @@ impl Guard {
     /// # Safety
     ///
     /// The `local` should be a valid pointer created by `Local::register()`.
+    #[doc(hidden)]
     pub unsafe fn new(local: *const Local) -> Guard {
         Guard { local: local }
     }
 
     /// Accesses the internal pointer to `Local`.
+    #[doc(hidden)]
     pub unsafe fn get_local(&self) -> *const Local {
         self.local
     }
@@ -367,27 +369,20 @@ impl Clone for Guard {
 /// is very helpful.
 ///
 /// ```
-/// extern crate crossbeam_epoch as epoch;
-/// #[cfg(feature = "manually_drop")]
-/// mod nodrop {
-///     pub use std::mem::ManuallyDrop as NoDrop;
-/// }
-/// #[cfg(not(feature = "manually_drop"))]
-/// extern crate nodrop;
-///
+/// use crossbeam_epoch::{self as epoch, Atomic};
 /// use std::ptr;
 /// use std::sync::atomic::Ordering::Relaxed;
 ///
-/// struct Stack<T> {
-///     head: epoch::Atomic<Node<T>>,
+/// struct Stack {
+///     head: epoch::Atomic<Node>,
 /// }
 ///
-/// struct Node<T> {
-///     data: nodrop::NoDrop<T>,
-///     next: epoch::Atomic<Node<T>>,
+/// struct Node {
+///     data: u32,
+///     next: epoch::Atomic<Node>,
 /// }
 ///
-/// impl<T> Drop for Stack<T> {
+/// impl Drop for Stack {
 ///     fn drop(&mut self) {
 ///         unsafe {
 ///             // Unprotected load.
@@ -397,11 +392,8 @@ impl Clone for Guard {
 ///                 // Unprotected load.
 ///                 let next = n.next.load(Relaxed, epoch::unprotected());
 ///
-///                 // Take ownership of the node, then drop its data and deallocate it.
-///                 let mut o = node.into_owned();
-///                 let data = nodrop::NoDrop::into_inner(ptr::read(&o.data));
-///                 drop(data);
-///                 drop(o);
+///                 // Take ownership of the node, then drop it.
+///                 drop(node.into_owned());
 ///
 ///                 node = next;
 ///             }
