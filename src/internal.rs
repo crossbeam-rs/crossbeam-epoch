@@ -19,14 +19,12 @@
 use core::cell::{Cell, UnsafeCell};
 use core::mem;
 use core::num::Wrapping;
-use core::ptr;
 use core::sync::atomic;
 use core::sync::atomic::Ordering;
 use alloc::boxed::Box;
 use alloc::arc::Arc;
 
 use crossbeam_utils::cache_padded::CachePadded;
-use nodrop::NoDrop;
 
 use atomic::Owned;
 use epoch::{AtomicEpoch, Epoch};
@@ -172,7 +170,7 @@ pub struct Local {
     /// A reference to the global data.
     ///
     /// When all guards and handles get dropped, this reference is destroyed.
-    global: UnsafeCell<NoDrop<Arc<Global>>>,
+    global: UnsafeCell<Option<Arc<Global>>>,
 
     /// The local bag of deferred functions.
     bag: UnsafeCell<Bag>,
@@ -200,7 +198,7 @@ impl Local {
             let local = Owned::new(Local {
                 entry: Entry::default(),
                 epoch: AtomicEpoch::new(Epoch::starting()),
-                global: UnsafeCell::new(NoDrop::new(global.clone())),
+                global: UnsafeCell::new(Some(global.clone())),
                 bag: UnsafeCell::new(Bag::new()),
                 guard_count: Cell::new(0),
                 handle_count: Cell::new(1),
@@ -220,7 +218,7 @@ impl Local {
     /// Returns a reference to the `Global` in which this `Local` resides.
     #[inline]
     pub fn global(&self) -> &Global {
-        unsafe { &*self.global.get() }
+        unsafe { (&*self.global.get()).as_ref().unwrap() }
     }
 
     /// Returns `true` if the current participant is pinned.
@@ -376,7 +374,7 @@ impl Local {
             // Take the reference to the `Global` out of this `Local`. Since we're not protected
             // by a guard at this time, it's crucial that the reference is read before marking the
             // `Local` as deleted.
-            let global: Arc<Global> = ptr::read(&**self.global.get());
+            let global: Arc<Global> = (&mut *self.global.get()).take().unwrap();
 
             // Mark this node in the linked list as deleted.
             self.entry.delete(&unprotected());
