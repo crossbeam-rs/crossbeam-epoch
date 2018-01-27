@@ -11,6 +11,7 @@ use core::ptr;
 use core::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 
 use crossbeam_utils::cache_padded::CachePadded;
+use nodrop::NoDrop;
 
 use {unprotected, Atomic, Guard, Owned, Shared};
 
@@ -30,7 +31,7 @@ struct Node<T> {
     /// example, the sentinel node in a queue never contains a value: its slot is always empty.
     /// Other nodes start their life with a push operation and contain a value until it gets popped
     /// out. After that such empty nodes get added to the collector for destruction.
-    data: Option<T>,
+    data: NoDrop<T>,
 
     next: Atomic<Node<T>>,
 }
@@ -38,12 +39,6 @@ struct Node<T> {
 impl<T> fmt::Debug for Node<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         write!(f, "node {{ ... }}")
-    }
-}
-
-impl<T> Drop for Node<T> {
-    fn drop(&mut self) {
-        mem::forget(self.data.take());
     }
 }
 
@@ -98,7 +93,7 @@ impl<T> Queue<T> {
     /// Adds `t` to the back of the queue, possibly waking up threads blocked on `pop`.
     pub fn push(&self, t: T, guard: &Guard) {
         let new = Owned::new(Node {
-            data: Some(t),
+            data: NoDrop::new(t),
             next: Atomic::null(),
         });
         let new = Owned::into_shared(new, guard);
@@ -126,7 +121,7 @@ impl<T> Queue<T> {
                     .compare_and_set(head, next, Release, guard)
                     .map(|_| {
                         guard.defer(move || drop(head.into_owned()));
-                        Some(ptr::read(&n.data).unwrap())
+                        Some(NoDrop::into_inner(ptr::read(&n.data)))
                     })
                     .map_err(|_| ())
             },
@@ -146,12 +141,12 @@ impl<T> Queue<T> {
         let h = unsafe { head.deref() };
         let next = h.next.load(Acquire, guard);
         match unsafe { next.as_ref() } {
-            Some(n) if condition(n.data.as_ref().unwrap()) => unsafe {
+            Some(n) if condition(&n.data) => unsafe {
                 self.head
                     .compare_and_set(head, next, Release, guard)
                     .map(|_| {
                         guard.defer(move || drop(head.into_owned()));
-                        Some(ptr::read(&n.data).unwrap())
+                        Some(NoDrop::into_inner(ptr::read(&n.data)))
                     })
                     .map_err(|_| ())
             },
