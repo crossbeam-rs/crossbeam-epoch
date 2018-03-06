@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Added
+- Add `Debug` impls for `Collector`, `Handle`, and `Guard`.
+
 ### Changed
 - Rename `Collector::handle` to `Collector::register`.
 
