@@ -71,8 +71,6 @@ impl Handle {
     }
 }
 
-unsafe impl Send for Handle {}
-
 impl Drop for Handle {
     #[inline]
     fn drop(&mut self) {

@@ -180,8 +180,6 @@ pub struct Local {
     pin_count: Cell<Wrapping<usize>>,
 }
 
-unsafe impl Sync for Local {}
-
 impl Local {
     /// Number of pinnings after which a participant will execute some deferred functions from the
     /// global queue.

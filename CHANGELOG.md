@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ### Changed
 - Rename `Collector::handle` to `Collector::register`.
 
+### Removed
+- Remove `Send` implementation for `Handle`.
+
 ## [0.4.0] - 2018-02-10
 ### Changed
 - Update dependencies.
