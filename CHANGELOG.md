@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Changed
+- Rename `Collector::handle` to `Collector::register`.
+
 ## [0.4.0] - 2018-02-10
 ### Changed
 - Update dependencies.

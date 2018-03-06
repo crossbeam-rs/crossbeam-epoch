@@ -7,7 +7,7 @@
 ///
 /// let collector = Collector::new();
 ///
-/// let handle = collector.handle();
+/// let handle = collector.register();
 /// drop(collector); // `handle` still works after dropping `collector`
 ///
 /// handle.pin().flush();
@@ -32,8 +32,8 @@ impl Collector {
         Collector { global: Arc::new(Global::new()) }
     }
 
-    /// Creates a new handle for the collector.
-    pub fn handle(&self) -> Handle {
+    /// Registers a new handle for the collector.
+    pub fn register(&self) -> Handle {
         Local::register(&self.global)
     }
 }
@@ -100,7 +100,7 @@ mod tests {
     #[test]
     fn pin_reentrant() {
         let collector = Collector::new();
-        let handle = collector.handle();
+        let handle = collector.register();
         drop(collector);
 
         assert!(!handle.is_pinned());
@@ -119,7 +119,7 @@ mod tests {
     #[test]
     fn flush_local_bag() {
         let collector = Collector::new();
-        let handle = collector.handle();
+        let handle = collector.register();
         drop(collector);
 
         for _ in 0..100 {
@@ -140,7 +140,7 @@ mod tests {
     #[test]
     fn garbage_buffering() {
         let collector = Collector::new();
-        let handle = collector.handle();
+        let handle = collector.register();
         drop(collector);
 
         let guard = &handle.pin();
@@ -161,7 +161,7 @@ mod tests {
             .map(|_| {
                 scoped::scope(|scope| {
                     scope.spawn(|| {
-                        let handle = collector.handle();
+                        let handle = collector.register();
                         for _ in 0..500_000 {
                             let guard = &handle.pin();
 
@@ -188,7 +188,7 @@ mod tests {
         static DESTROYS: AtomicUsize = ATOMIC_USIZE_INIT;
 
         let collector = Collector::new();
-        let handle = collector.handle();
+        let handle = collector.register();
 
         unsafe {
             let guard = &handle.pin();
@@ -221,7 +221,7 @@ mod tests {
         static DESTROYS: AtomicUsize = ATOMIC_USIZE_INIT;
 
         let collector = Collector::new();
-        let handle = collector.handle();
+        let handle = collector.register();
 
         unsafe {
             let guard = &handle.pin();
@@ -262,7 +262,7 @@ mod tests {
         }
 
         let collector = Collector::new();
-        let handle = collector.handle();
+        let handle = collector.register();
 
         unsafe {
             let guard = &handle.pin();
@@ -287,7 +287,7 @@ mod tests {
         static DESTROYS: AtomicUsize = ATOMIC_USIZE_INIT;
 
         let collector = Collector::new();
-        let handle = collector.handle();
+        let handle = collector.register();
 
         unsafe {
             let guard = &handle.pin();
@@ -323,7 +323,7 @@ mod tests {
         }
 
         let collector = Collector::new();
-        let handle = collector.handle();
+        let handle = collector.register();
 
         let mut guard = handle.pin();
 
@@ -351,7 +351,7 @@ mod tests {
         static DESTROYS: AtomicUsize = ATOMIC_USIZE_INIT;
 
         let collector = Collector::new();
-        let handle = collector.handle();
+        let handle = collector.register();
 
         unsafe {
             let guard = &handle.pin();
@@ -399,7 +399,7 @@ mod tests {
             .map(|_| {
                 scoped::scope(|scope| {
                     scope.spawn(|| {
-                        let handle = collector.handle();
+                        let handle = collector.register();
                         for _ in 0..COUNT {
                             let guard = &handle.pin();
                             unsafe {
@@ -416,7 +416,7 @@ mod tests {
             t.join();
         }
 
-        let handle = collector.handle();
+        let handle = collector.register();
         while DROPS.load(Ordering::Relaxed) < COUNT * THREADS {
             let guard = &handle.pin();
             collector.global.collect(guard);
