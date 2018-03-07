@@ -12,8 +12,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ### Changed
 - Rename `Collector::handle` to `Collector::register`.
 
-### Removed
-- Remove `Send` implementation for `Handle`.
+### Fixed
+- Remove the `Send` implementation for `Handle` (this was a bug). Only
+  `Collector`s can be shared among multiple threads, while `Handle`s and
+  `Guard`s must stay within the thread in which they were created.
 
 ## [0.4.0] - 2018-02-10
 ### Changed
