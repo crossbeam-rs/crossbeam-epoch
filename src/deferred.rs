@@ -1,3 +1,4 @@
+use core::fmt;
 use core::mem;
 use core::ptr;
 use alloc::boxed::Box;
@@ -17,6 +18,12 @@ type Data = [usize; DATA_WORDS];
 pub struct Deferred {
     call: unsafe fn(*mut u8),
     data: Data,
+}
+
+impl fmt::Debug for Deferred {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        write!(f, "Deferred {{ ... }}")
+    }
 }
 
 impl Deferred {

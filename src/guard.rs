@@ -2,7 +2,7 @@ use core::fmt;
 use core::ptr;
 use core::mem;
 
-use garbage::Garbage;
+use deferred::Deferred;
 use internal::Local;
 use collector::Collector;
 
@@ -159,10 +159,8 @@ impl Guard {
     where
         F: FnOnce() -> R,
     {
-        let garbage = Garbage::new(|| drop(f()));
-
         if let Some(local) = self.local.as_ref() {
-            local.defer(garbage, self);
+            local.defer(Deferred::new(move || drop(f())), self);
         }
     }
 

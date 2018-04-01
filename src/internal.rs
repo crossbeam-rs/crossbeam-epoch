@@ -15,6 +15,25 @@
 //!
 //! When a participant is pinned, a `Guard` is returned as a witness that the participant is pinned.
 //! Guards are necessary for performing atomic operations, and for freeing/dropping locations.
+//!
+//! # Thread-local bag
+//!
+//! Objects that get unlinked from concurrent data structures must be stashed away until the global
+//! epoch sufficiently advances so that they become safe for destruction.  Pointers to such objects
+//! are pushed into a thread-local bag, and when it becomes full, the bag is marked with the current
+//! global epoch and pushed into the global queue of bags.  We store objects in thread-local
+//! storages for amortizing the synchronization cost of pushing the garbages to a global queue.
+//!
+//! # Global queue
+//!
+//! Whenever a bag is pushed into a queue, the objects in some bags in the queue are collected and
+//! destroyed along the way.  This design reduces contention on data structures.  The global queue
+//! cannot be explicitly accessed: the only way to interact with it is by calling functions
+//! `defer()` that adds an object tothe thread-local bag, or `collect()` that manually triggers
+//! garbage collection.
+//!
+//! Ideally each instance of concurrent data structure may have its own queue that gets fully
+//! destroyed as soon as the data structure gets dropped.
 
 use core::cell::{Cell, UnsafeCell};
 use core::mem::{self, ManuallyDrop};
@@ -25,14 +44,57 @@ use core::sync::atomic::Ordering;
 use alloc::boxed::Box;
 
 use crossbeam_utils::cache_padded::CachePadded;
+use arrayvec::ArrayVec;
 
 use atomic::Owned;
 use collector::{Handle, Collector};
 use epoch::{AtomicEpoch, Epoch};
 use guard::{unprotected, Guard};
-use garbage::{Bag, Garbage};
+use deferred::Deferred;
 use sync::list::{List, Entry, IterError, IsElement};
 use sync::queue::Queue;
+
+/// Maximum number of objects a bag can contain.
+#[cfg(not(feature = "sanitize"))]
+const MAX_OBJECTS: usize = 64;
+#[cfg(feature = "sanitize")]
+const MAX_OBJECTS: usize = 4;
+
+/// Bag of garbages.
+#[derive(Default, Debug)]
+pub struct Bag {
+    /// Stashed objects.
+    deferreds: ArrayVec<[Deferred; MAX_OBJECTS]>,
+}
+
+unsafe impl Sync for Bag {}
+unsafe impl Send for Bag {}
+
+impl Bag {
+    /// Returns a new, empty bag.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Returns `true` if the bag is empty.
+    pub fn is_empty(&self) -> bool {
+        self.deferreds.is_empty()
+    }
+
+    /// Attempts to insert a garbage object into the bag and returns `true` if succeeded.
+    pub fn try_push(&mut self, deferred: Deferred) -> Result<(), Deferred> {
+        self.deferreds.try_push(deferred).map_err(|e| e.element())
+    }
+}
+
+impl Drop for Bag {
+    fn drop(&mut self) {
+        // Call all deferred functions.
+        for deferred in self.deferreds.iter_mut() {
+            deferred.call();
+        }
+    }
+}
 
 /// The global data for a garbage collector.
 pub struct Global {
@@ -221,12 +283,12 @@ impl Local {
         self.guard_count.get() > 0
     }
 
-    pub fn defer(&self, mut garbage: Garbage, guard: &Guard) {
+    pub fn defer(&self, mut deferred: Deferred, guard: &Guard) {
         let bag = unsafe { &mut *self.bag.get() };
 
-        while let Err(g) = bag.try_push(garbage) {
+        while let Err(d) = bag.try_push(deferred) {
             self.global().push_bag(bag, guard);
-            garbage = g;
+            deferred = d;
         }
     }
 
@@ -397,5 +459,51 @@ impl IsElement<Local> for Local {
     unsafe fn finalize(entry: &Entry) {
         let local = Self::element_of(entry);
         drop(Box::from_raw(local as *const Local as *mut Local));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, ATOMIC_USIZE_INIT};
+    use std::sync::atomic::Ordering;
+
+    use super::*;
+
+    #[test]
+    fn check_defer() {
+        static FLAG: AtomicUsize = ATOMIC_USIZE_INIT;
+        fn set() {
+            FLAG.store(42, Ordering::Relaxed);
+        }
+
+        let mut d = Deferred::new(set);
+        assert_eq!(FLAG.load(Ordering::Relaxed), 0);
+        d.call();
+        assert_eq!(FLAG.load(Ordering::Relaxed), 42);
+    }
+
+    #[test]
+    fn check_bag() {
+        static FLAG: AtomicUsize = ATOMIC_USIZE_INIT;
+        fn incr() {
+            FLAG.fetch_add(1, Ordering::Relaxed);
+        }
+
+        let mut bag = Bag::new();
+        assert!(bag.is_empty());
+
+        for _ in 0..MAX_OBJECTS {
+            assert!(bag.try_push(Deferred::new(incr)).is_ok());
+            assert!(!bag.is_empty());
+            assert_eq!(FLAG.load(Ordering::Relaxed), 0);
+        }
+
+        let result = bag.try_push(Deferred::new(incr));
+        assert!(result.is_err());
+        assert!(!bag.is_empty());
+        assert_eq!(FLAG.load(Ordering::Relaxed), 0);
+
+        drop(bag);
+        assert_eq!(FLAG.load(Ordering::Relaxed), MAX_OBJECTS);
     }
 }
