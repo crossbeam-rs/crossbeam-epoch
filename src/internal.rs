@@ -19,15 +19,15 @@
 //! # Thread-local bag
 //!
 //! Objects that get unlinked from concurrent data structures must be stashed away until the global
-//! epoch sufficiently advances so that they become safe for destruction.  Pointers to such objects
+//! epoch sufficiently advances so that they become safe for destruction. Pointers to such objects
 //! are pushed into a thread-local bag, and when it becomes full, the bag is marked with the current
-//! global epoch and pushed into the global queue of bags.  We store objects in thread-local
-//! storages for amortizing the synchronization cost of pushing the garbages to a global queue.
+//! global epoch and pushed into the global queue of bags. We store objects in thread-local storages
+//! for amortizing the synchronization cost of pushing the garbages to a global queue.
 //!
 //! # Global queue
 //!
 //! Whenever a bag is pushed into a queue, the objects in some bags in the queue are collected and
-//! destroyed along the way.  This design reduces contention on data structures.  The global queue
+//! destroyed along the way. This design reduces contention on data structures. The global queue
 //! cannot be explicitly accessed: the only way to interact with it is by calling functions
 //! `defer()` that adds an object tothe thread-local bag, or `collect()` that manually triggers
 //! garbage collection.
@@ -67,7 +67,8 @@ pub struct Bag {
     deferreds: ArrayVec<[Deferred; MAX_OBJECTS]>,
 }
 
-unsafe impl Sync for Bag {}
+// It is safe to implement `Send` for `Bag`, since the user of `Bag::try_push()` guarantees that
+// another thread may execute any `Deferred` functions inside a `Bag`.
 unsafe impl Send for Bag {}
 
 impl Bag {
@@ -81,8 +82,15 @@ impl Bag {
         self.deferreds.is_empty()
     }
 
-    /// Attempts to insert a garbage object into the bag and returns `true` if succeeded.
-    pub fn try_push(&mut self, deferred: Deferred) -> Result<(), Deferred> {
+    /// Attempts to insert a garbage object into the bag.
+    ///
+    /// Returns `Ok(())` if successful, and `Err(deferred)` for the given `deferred` if
+    /// unsuccessful.
+    ///
+    /// # Safety
+    ///
+    /// Another thread may execute the `deferred` function.
+    pub unsafe fn try_push(&mut self, deferred: Deferred) -> Result<(), Deferred> {
         self.deferreds.try_push(deferred).map_err(|e| e.element())
     }
 }
@@ -283,8 +291,13 @@ impl Local {
         self.guard_count.get() > 0
     }
 
-    pub fn defer(&self, mut deferred: Deferred, guard: &Guard) {
-        let bag = unsafe { &mut *self.bag.get() };
+    /// Adds `deferred` to the thread-local bag.
+    ///
+    /// # Safety
+    /// 
+    /// Another thread may execute the `deferred` function.
+    pub unsafe fn defer(&self, mut deferred: Deferred, guard: &Guard) {
+        let bag = &mut *self.bag.get();
 
         while let Err(d) = bag.try_push(deferred) {
             self.global().push_bag(bag, guard);
@@ -381,7 +394,7 @@ impl Local {
                 self.epoch.store(global_epoch, Ordering::Release);
 
                 // However, we don't need a following `SeqCst` fence, because it is safe for memory
-                // accesses from the new epoch to be executed before updating the local epoch.  At
+                // accesses from the new epoch to be executed before updating the local epoch. At
                 // worse, other threads will see the new epoch late and delay GC slightly.
             }
         }
@@ -435,9 +448,9 @@ impl Local {
             // Mark this node in the linked list as deleted.
             self.entry.delete(&unprotected());
 
-            // Finally, drop the reference to the global.  Note that this might be the last
-            // reference to the `Global`. If so, the global data will be destroyed and all deferred
-            // functions in its queue will be executed.
+            // Finally, drop the reference to the global. Note that this might be the last reference
+            // to the `Global`. If so, the global data will be destroyed and all deferred functions
+            // in its queue will be executed.
             drop(collector);
         }
     }
@@ -493,12 +506,12 @@ mod tests {
         assert!(bag.is_empty());
 
         for _ in 0..MAX_OBJECTS {
-            assert!(bag.try_push(Deferred::new(incr)).is_ok());
+            assert!(unsafe { bag.try_push(Deferred::new(incr)).is_ok() });
             assert!(!bag.is_empty());
             assert_eq!(FLAG.load(Ordering::Relaxed), 0);
         }
 
-        let result = bag.try_push(Deferred::new(incr));
+        let result = unsafe { bag.try_push(Deferred::new(incr)) };
         assert!(result.is_err());
         assert!(!bag.is_empty());
         assert_eq!(FLAG.load(Ordering::Relaxed), 0);
