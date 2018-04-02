@@ -89,7 +89,8 @@ impl Bag {
     ///
     /// # Safety
     ///
-    /// Another thread may execute the `deferred` function.
+    /// `deferred` should not have already been called. Also, another thread may execute the
+    /// `deferred` function.
     pub unsafe fn try_push(&mut self, deferred: Deferred) -> Result<(), Deferred> {
         self.deferreds.try_push(deferred).map_err(|e| e.element())
     }
@@ -296,7 +297,8 @@ impl Local {
     /// # Safety
     /// 
     /// Another thread may execute the `deferred` function.
-    pub unsafe fn defer(&self, mut deferred: Deferred, guard: &Guard) {
+    pub unsafe fn defer<F: FnOnce()>(&self, f: F, guard: &Guard) {
+        let mut deferred = Deferred::new(f);
         let bag = &mut *self.bag.get();
 
         while let Err(d) = bag.try_push(deferred) {
