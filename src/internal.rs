@@ -82,10 +82,6 @@ impl Bag {
     ///
     /// Returns `Ok(())` if successful, and `Err(deferred)` for the given `deferred` if the bag is
     /// full.
-    ///
-    /// # Panics
-    ///
-    /// If `deferred` is already called, this method will panic.
     pub fn try_push(&mut self, deferred: Deferred) -> Result<(), Deferred> {
         self.deferreds.try_push(deferred).map_err(|e| e.element())
     }
@@ -94,7 +90,7 @@ impl Bag {
 impl Drop for Bag {
     fn drop(&mut self) {
         // Call all deferred functions.
-        for deferred in self.deferreds.iter_mut() {
+        for deferred in self.deferreds.drain(..) {
             deferred.call();
         }
     }
@@ -481,7 +477,7 @@ mod tests {
             FLAG.store(42, Ordering::Relaxed);
         }
 
-        let mut d = Deferred::new(set);
+        let d = unsafe { Deferred::new(set) };
         assert_eq!(FLAG.load(Ordering::Relaxed), 0);
         d.call();
         assert_eq!(FLAG.load(Ordering::Relaxed), 42);
