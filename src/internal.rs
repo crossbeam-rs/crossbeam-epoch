@@ -60,16 +60,12 @@ const MAX_OBJECTS: usize = 64;
 #[cfg(feature = "sanitize")]
 const MAX_OBJECTS: usize = 4;
 
-/// Bag of garbages.
+/// A bag of deferred functions.
 #[derive(Default, Debug)]
 pub struct Bag {
     /// Stashed objects.
     deferreds: ArrayVec<[Deferred; MAX_OBJECTS]>,
 }
-
-// It is safe to implement `Send` for `Bag`, since the user of `Bag::try_push()` guarantees that
-// another thread may execute any `Deferred` functions inside a `Bag`.
-unsafe impl Send for Bag {}
 
 impl Bag {
     /// Returns a new, empty bag.
@@ -82,16 +78,15 @@ impl Bag {
         self.deferreds.is_empty()
     }
 
-    /// Attempts to insert a garbage object into the bag.
+    /// Attempts to insert a deferred function into the bag.
     ///
-    /// Returns `Ok(())` if successful, and `Err(deferred)` for the given `deferred` if
-    /// unsuccessful.
+    /// Returns `Ok(())` if successful, and `Err(deferred)` for the given `deferred` if the bag is
+    /// full.
     ///
-    /// # Safety
+    /// # Panics
     ///
-    /// `deferred` should not have already been called. Also, another thread may execute the
-    /// `deferred` function.
-    pub unsafe fn try_push(&mut self, deferred: Deferred) -> Result<(), Deferred> {
+    /// If `deferred` is already called, this method will panic.
+    pub fn try_push(&mut self, deferred: Deferred) -> Result<(), Deferred> {
         self.deferreds.try_push(deferred).map_err(|e| e.element())
     }
 }
@@ -293,13 +288,8 @@ impl Local {
     }
 
     /// Adds `deferred` to the thread-local bag.
-    ///
-    /// # Safety
-    /// 
-    /// Another thread may execute the `deferred` function.
-    pub unsafe fn defer<F: FnOnce()>(&self, f: F, guard: &Guard) {
-        let mut deferred = Deferred::new(f);
-        let bag = &mut *self.bag.get();
+    pub fn defer(&self, mut deferred: Deferred, guard: &Guard) {
+        let bag = unsafe { &mut *self.bag.get() };
 
         while let Err(d) = bag.try_push(deferred) {
             self.global().push_bag(bag, guard);

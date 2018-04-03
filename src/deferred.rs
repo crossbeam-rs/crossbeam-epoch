@@ -20,6 +20,9 @@ pub struct Deferred {
     data: Data,
 }
 
+/// `Deferred::new` requires that another thread may execute the inner function.
+unsafe impl Send for Deferred {}
+
 impl fmt::Debug for Deferred {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         write!(f, "Deferred {{ ... }}")
@@ -28,38 +31,40 @@ impl fmt::Debug for Deferred {
 
 impl Deferred {
     /// Constructs a new `Deferred` from a `FnOnce()`.
-    pub fn new<F: FnOnce()>(f: F) -> Self {
+    ///
+    /// # Safety
+    ///
+    /// It should be safe for another thread to execute the given function.
+    pub unsafe fn new<F: FnOnce()>(f: F) -> Self {
         let size = mem::size_of::<F>();
         let align = mem::align_of::<F>();
 
-        unsafe {
-            if size <= mem::size_of::<Data>() && align <= mem::align_of::<Data>() {
-                let mut data: Data = mem::uninitialized();
-                ptr::write(&mut data as *mut Data as *mut F, f);
+        if size <= mem::size_of::<Data>() && align <= mem::align_of::<Data>() {
+            let mut data: Data = mem::uninitialized();
+            ptr::write(&mut data as *mut Data as *mut F, f);
 
-                unsafe fn call<F: FnOnce()>(raw: *mut u8) {
-                    let f: F = ptr::read(raw as *mut F);
-                    f();
-                }
+            unsafe fn call<F: FnOnce()>(raw: *mut u8) {
+                let f: F = ptr::read(raw as *mut F);
+                f();
+            }
 
-                Deferred {
-                    call: call::<F>,
-                    data,
-                }
-            } else {
-                let b: Box<F> = Box::new(f);
-                let mut data: Data = mem::uninitialized();
-                ptr::write(&mut data as *mut Data as *mut Box<F>, b);
+            Deferred {
+                call: call::<F>,
+                data,
+            }
+        } else {
+            let b: Box<F> = Box::new(f);
+            let mut data: Data = mem::uninitialized();
+            ptr::write(&mut data as *mut Data as *mut Box<F>, b);
 
-                unsafe fn call<F: FnOnce()>(raw: *mut u8) {
-                    let b: Box<F> = ptr::read(raw as *mut Box<F>);
-                    (*b)();
-                }
+            unsafe fn call<F: FnOnce()>(raw: *mut u8) {
+                let b: Box<F> = ptr::read(raw as *mut Box<F>);
+                (*b)();
+            }
 
-                Deferred {
-                    call: call::<F>,
-                    data,
-                }
+            Deferred {
+                call: call::<F>,
+                data,
             }
         }
     }
