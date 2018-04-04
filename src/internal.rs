@@ -67,6 +67,9 @@ pub struct Bag {
     deferreds: ArrayVec<[Deferred; MAX_OBJECTS]>,
 }
 
+/// `Bag::try_push()` requires that it is safe for another thread to execute the given functions.
+unsafe impl Send for Bag {}
+
 impl Bag {
     /// Returns a new, empty bag.
     pub fn new() -> Self {
@@ -82,7 +85,11 @@ impl Bag {
     ///
     /// Returns `Ok(())` if successful, and `Err(deferred)` for the given `deferred` if the bag is
     /// full.
-    pub fn try_push(&mut self, deferred: Deferred) -> Result<(), Deferred> {
+    ///
+    /// # Safety
+    ///
+    /// It should be safe for another thread to execute the given function.
+    pub unsafe fn try_push(&mut self, deferred: Deferred) -> Result<(), Deferred> {
         self.deferreds.try_push(deferred).map_err(|e| e.element())
     }
 }
@@ -96,13 +103,37 @@ impl Drop for Bag {
     }
 }
 
+/// A pair of an epoch and a bag.
+#[derive(Default, Debug)]
+struct EpochBag {
+    epoch: Epoch,
+    bag: Bag,
+}
+
+/// It is safe to share `EpochBag` because `is_droppable` only inspects the epoch.
+unsafe impl Sync for EpochBag {}
+
+impl EpochBag {
+    /// Creates a new `EpochBag`.
+    fn new(epoch: Epoch, bag: Bag) -> Self {
+        Self { epoch, bag }
+    }
+
+    /// Checks if it is safe to drop the bag w.r.t. the given global epoch.
+    fn is_droppable(&self, global_epoch: Epoch) -> bool {
+        // A pinned participant can witness at most one epoch advancement. Therefore, any bag that
+        // is within one epoch of the current one cannot be destroyed yet.
+        global_epoch.wrapping_sub(self.epoch) >= 2
+    }
+}
+
 /// The global data for a garbage collector.
 pub struct Global {
     /// The intrusive linked list of `Local`s.
     locals: List<Local>,
 
     /// The global queue of bags of deferred functions.
-    queue: Queue<(Epoch, Bag)>,
+    queue: Queue<EpochBag>,
 
     /// The global epoch.
     pub(crate) epoch: CachePadded<AtomicEpoch>,
@@ -129,7 +160,7 @@ impl Global {
         atomic::fence(Ordering::SeqCst);
 
         let epoch = self.epoch.load(Ordering::Relaxed);
-        self.queue.push((epoch, bag), guard);
+        self.queue.push(EpochBag::new(epoch, bag), guard);
     }
 
     /// Collects several bags from the global queue and executes deferred functions in them.
@@ -143,12 +174,6 @@ impl Global {
     pub fn collect(&self, guard: &Guard) {
         let global_epoch = self.try_advance(guard);
 
-        let condition = |item: &(Epoch, Bag)| {
-            // A pinned participant can witness at most one epoch advancement. Therefore, any bag
-            // that is within one epoch of the current one cannot be destroyed yet.
-            global_epoch.wrapping_sub(item.0) >= 2
-        };
-
         let steps = if cfg!(feature = "sanitize") {
             usize::max_value()
         } else {
@@ -156,9 +181,13 @@ impl Global {
         };
 
         for _ in 0..steps {
-            match self.queue.try_pop_if(&condition, guard) {
+            match self.queue.try_pop_if(
+                &|epoch_bag: &EpochBag| epoch_bag.is_droppable(global_epoch),
+                guard,
+            )
+            {
                 None => break,
-                Some(bag) => drop(bag),
+                Some(epoch_bag) => drop(epoch_bag),
             }
         }
     }
@@ -284,8 +313,12 @@ impl Local {
     }
 
     /// Adds `deferred` to the thread-local bag.
-    pub fn defer(&self, mut deferred: Deferred, guard: &Guard) {
-        let bag = unsafe { &mut *self.bag.get() };
+    ///
+    /// # Safety
+    ///
+    /// It should be safe for another thread to execute the given function.
+    pub unsafe fn defer(&self, mut deferred: Deferred, guard: &Guard) {
+        let bag = &mut *self.bag.get();
 
         while let Err(d) = bag.try_push(deferred) {
             self.global().push_bag(bag, guard);
@@ -477,7 +510,7 @@ mod tests {
             FLAG.store(42, Ordering::Relaxed);
         }
 
-        let d = unsafe { Deferred::new(set) };
+        let d = Deferred::new(set);
         assert_eq!(FLAG.load(Ordering::Relaxed), 0);
         d.call();
         assert_eq!(FLAG.load(Ordering::Relaxed), 42);

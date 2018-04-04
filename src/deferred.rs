@@ -1,4 +1,5 @@
 use core::fmt;
+use core::marker::PhantomData;
 use core::mem;
 use core::ptr;
 use alloc::boxed::Box;
@@ -18,10 +19,8 @@ type Data = [usize; DATA_WORDS];
 pub struct Deferred {
     call: unsafe fn(*mut u8),
     data: Data,
+    _marker: PhantomData<*mut ()>, // !Send + !Sync
 }
-
-/// `Deferred::new` requires that another thread may execute the inner function.
-unsafe impl Send for Deferred {}
 
 impl fmt::Debug for Deferred {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
@@ -31,40 +30,40 @@ impl fmt::Debug for Deferred {
 
 impl Deferred {
     /// Constructs a new `Deferred` from a `FnOnce()`.
-    ///
-    /// # Safety
-    ///
-    /// It should be safe for another thread to execute the given function.
-    pub unsafe fn new<F: FnOnce()>(f: F) -> Self {
+    pub fn new<F: FnOnce()>(f: F) -> Self {
         let size = mem::size_of::<F>();
         let align = mem::align_of::<F>();
 
-        if size <= mem::size_of::<Data>() && align <= mem::align_of::<Data>() {
-            let mut data: Data = mem::uninitialized();
-            ptr::write(&mut data as *mut Data as *mut F, f);
+        unsafe {
+            if size <= mem::size_of::<Data>() && align <= mem::align_of::<Data>() {
+                let mut data: Data = mem::uninitialized();
+                ptr::write(&mut data as *mut Data as *mut F, f);
 
-            unsafe fn call<F: FnOnce()>(raw: *mut u8) {
-                let f: F = ptr::read(raw as *mut F);
-                f();
-            }
+                unsafe fn call<F: FnOnce()>(raw: *mut u8) {
+                    let f: F = ptr::read(raw as *mut F);
+                    f();
+                }
 
-            Deferred {
-                call: call::<F>,
-                data,
-            }
-        } else {
-            let b: Box<F> = Box::new(f);
-            let mut data: Data = mem::uninitialized();
-            ptr::write(&mut data as *mut Data as *mut Box<F>, b);
+                Deferred {
+                    call: call::<F>,
+                    data,
+                    _marker: PhantomData,
+                }
+            } else {
+                let b: Box<F> = Box::new(f);
+                let mut data: Data = mem::uninitialized();
+                ptr::write(&mut data as *mut Data as *mut Box<F>, b);
 
-            unsafe fn call<F: FnOnce()>(raw: *mut u8) {
-                let b: Box<F> = ptr::read(raw as *mut Box<F>);
-                (*b)();
-            }
+                unsafe fn call<F: FnOnce()>(raw: *mut u8) {
+                    let b: Box<F> = ptr::read(raw as *mut Box<F>);
+                    (*b)();
+                }
 
-            Deferred {
-                call: call::<F>,
-                data,
+                Deferred {
+                    call: call::<F>,
+                    data,
+                    _marker: PhantomData,
+                }
             }
         }
     }
@@ -87,10 +86,10 @@ mod tests {
         let fired = &Cell::new(false);
         let a = [0usize; 1];
 
-        let d = unsafe { Deferred::new(move || {
+        let d = Deferred::new(move || {
             drop(a);
             fired.set(true);
-        }) };
+        });
 
         assert!(!fired.get());
         d.call();
@@ -99,45 +98,37 @@ mod tests {
 
     #[test]
     fn on_heap() {
-        unsafe {
-            let fired = &Cell::new(false);
-            let a = [0usize; 10];
+        let fired = &Cell::new(false);
+        let a = [0usize; 10];
 
-            let d = Deferred::new(move || {
-                drop(a);
-                fired.set(true);
-            });
+        let d = Deferred::new(move || {
+            drop(a);
+            fired.set(true);
+        });
 
-            assert!(!fired.get());
-            d.call();
-            assert!(fired.get());
-        }
+        assert!(!fired.get());
+        d.call();
+        assert!(fired.get());
     }
 
     #[test]
     fn string() {
-        unsafe {
-            let a = "hello".to_string();
-            let d = Deferred::new(move || assert_eq!(a, "hello"));
-            d.call();
-        }
+        let a = "hello".to_string();
+        let d = Deferred::new(move || assert_eq!(a, "hello"));
+        d.call();
     }
 
     #[test]
     fn boxed_slice_i32() {
-        unsafe {
-            let a: Box<[i32]> = vec![2, 3, 5, 7].into_boxed_slice();
-            let d = Deferred::new(move || assert_eq!(*a, [2, 3, 5, 7]));
-            d.call();
-        }
+        let a: Box<[i32]> = vec![2, 3, 5, 7].into_boxed_slice();
+        let d = Deferred::new(move || assert_eq!(*a, [2, 3, 5, 7]));
+        d.call();
     }
 
     #[test]
     fn long_slice_usize() {
-        unsafe {
-            let a: [usize; 5] = [2, 3, 5, 7, 11];
-            let d = Deferred::new(move || assert_eq!(a, [2, 3, 5, 7, 11]));
-            d.call();
-        }
+        let a: [usize; 5] = [2, 3, 5, 7, 11];
+        let d = Deferred::new(move || assert_eq!(a, [2, 3, 5, 7, 11]));
+        d.call();
     }
 }
