@@ -68,7 +68,7 @@ impl Deferred {
         }
     }
 
-    /// Calls the function or panics if it was already called.
+    /// Calls the function.
     #[inline]
     pub fn call(mut self) {
         let call = self.call;
