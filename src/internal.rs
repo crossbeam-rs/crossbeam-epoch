@@ -92,6 +92,11 @@ impl Bag {
     pub unsafe fn try_push(&mut self, deferred: Deferred) -> Result<(), Deferred> {
         self.deferreds.try_push(deferred).map_err(|e| e.element())
     }
+
+    /// Seals the bag with the given epoch.
+    fn seal(self, epoch: Epoch) -> SealedBag {
+        SealedBag { epoch, bag: self }
+    }
 }
 
 impl Drop for Bag {
@@ -105,22 +110,17 @@ impl Drop for Bag {
 
 /// A pair of an epoch and a bag.
 #[derive(Default, Debug)]
-struct EpochBag {
+struct SealedBag {
     epoch: Epoch,
     bag: Bag,
 }
 
-/// It is safe to share `EpochBag` because `is_droppable` only inspects the epoch.
-unsafe impl Sync for EpochBag {}
+/// It is safe to share `SealedBag` because `is_expired` only inspects the epoch.
+unsafe impl Sync for SealedBag {}
 
-impl EpochBag {
-    /// Creates a new `EpochBag`.
-    fn new(epoch: Epoch, bag: Bag) -> Self {
-        Self { epoch, bag }
-    }
-
+impl SealedBag {
     /// Checks if it is safe to drop the bag w.r.t. the given global epoch.
-    fn is_droppable(&self, global_epoch: Epoch) -> bool {
+    fn is_expired(&self, global_epoch: Epoch) -> bool {
         // A pinned participant can witness at most one epoch advancement. Therefore, any bag that
         // is within one epoch of the current one cannot be destroyed yet.
         global_epoch.wrapping_sub(self.epoch) >= 2
@@ -133,7 +133,7 @@ pub struct Global {
     locals: List<Local>,
 
     /// The global queue of bags of deferred functions.
-    queue: Queue<EpochBag>,
+    queue: Queue<SealedBag>,
 
     /// The global epoch.
     pub(crate) epoch: CachePadded<AtomicEpoch>,
@@ -160,7 +160,7 @@ impl Global {
         atomic::fence(Ordering::SeqCst);
 
         let epoch = self.epoch.load(Ordering::Relaxed);
-        self.queue.push(EpochBag::new(epoch, bag), guard);
+        self.queue.push(bag.seal(epoch), guard);
     }
 
     /// Collects several bags from the global queue and executes deferred functions in them.
@@ -182,12 +182,12 @@ impl Global {
 
         for _ in 0..steps {
             match self.queue.try_pop_if(
-                &|epoch_bag: &EpochBag| epoch_bag.is_droppable(global_epoch),
+                &|sealed_bag: &SealedBag| sealed_bag.is_expired(global_epoch),
                 guard,
             )
             {
                 None => break,
-                Some(epoch_bag) => drop(epoch_bag),
+                Some(sealed_bag) => drop(sealed_bag),
             }
         }
     }
