@@ -35,7 +35,7 @@ pub fn default_handle() -> Handle {
     with_handle(|handle| handle.clone())
 }
 
-/// Returns the default handle associated with the current thread.
+/// Returns the default global collector.
 #[inline]
 pub fn default_collector() -> &'static Collector {
     &COLLECTOR
