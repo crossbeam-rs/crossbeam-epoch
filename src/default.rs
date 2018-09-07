@@ -59,6 +59,7 @@ mod tests {
 
         impl Drop for Foo {
             fn drop(&mut self) {
+                // Pin after `HANDLE` has been dropped. This must not panic.
                 super::pin();
             }
         }
@@ -69,8 +70,10 @@ mod tests {
 
         thread::scope(|scope| {
             scope.spawn(|| {
+                // Initialize `FOO` and then `HANDLE`.
                 FOO.with(|_| ());
                 super::pin();
+                // At thread exit, `HANDLE` gets dropped first and `FOO` second.
             });
         });
     }
