@@ -88,9 +88,10 @@ impl Guard {
     /// functions from both local and global caches may get executed in order to incrementally
     /// clean up the caches as they fill up.
     ///
-    /// There is no guarantee when exactly `f` will be executed. The only guarantee is that won't
-    /// until all currently pinned threads get unpinned. In theory, `f` might never be deallocated,
-    /// but the epoch-based garbage collection will make an effort to execute it reasonably soon.
+    /// There is no guarantee when exactly `f` will be executed. The only guarantee is that it
+    /// won't be executed until all currently pinned threads get unpinned. In theory, `f` might
+    /// never run, but the epoch-based garbage collection will make an effort to execute it
+    /// reasonably soon.
     ///
     /// If this method is called from an [`unprotected`] guard, the function will simply be
     /// executed immediately.
@@ -114,9 +115,10 @@ impl Guard {
     /// functions from both local and global caches may get executed in order to incrementally
     /// clean up the caches as they fill up.
     ///
-    /// There is no guarantee when exactly `f` will be executed. The only guarantee is that won't
-    /// until all currently pinned threads get unpinned. In theory, `f` might never be deallocated,
-    /// but the epoch-based garbage collection will make an effort to execute it reasonably soon.
+    /// There is no guarantee when exactly `f` will be executed. The only guarantee is that it
+    /// won't be executed until all currently pinned threads get unpinned. In theory, `f` might
+    /// never run, but the epoch-based garbage collection will make an effort to execute it
+    /// reasonably soon.
     ///
     /// If this method is called from an [`unprotected`] guard, the function will simply be
     /// executed immediately.
@@ -213,9 +215,9 @@ impl Guard {
     /// incrementally clean up the caches as they fill up.
     ///
     /// There is no guarantee when exactly the destructor will be executed. The only guarantee is
-    /// that won't until all currently pinned threads get unpinned. In theory, `f` might never be
-    /// deallocated, but the epoch-based garbage collection will make an effort to execute it
-    /// reasonably soon.
+    /// that it won't be executed until all currently pinned threads get unpinned. In theory, the
+    /// destructor might never run, but the epoch-based garbage collection will make an effort to
+    /// execute it reasonably soon.
     ///
     /// If this method is called from an [`unprotected`] guard, the destructor will simply be
     /// executed immediately.
@@ -225,20 +227,20 @@ impl Guard {
     /// The object must not be reachable by other threads anymore, otherwise it might be still in
     /// use when the destructor runs.
     ///
-    /// Apart from that, keep in mind that another thread may execute `f`, so the object must be
-    /// sendable to other threads.
+    /// Apart from that, keep in mind that another thread may execute the destructor, so the object
+    /// must be sendable to other threads.
     ///
-    /// We intentionally didn't require `F: Send`, because Rust's type systems usually cannot prove
-    /// `F: Send` for typical use cases. For example, consider the following code snippet, which
+    /// We intentionally didn't require `T: Send`, because Rust's type systems usually cannot prove
+    /// `T: Send` for typical use cases. For example, consider the following code snippet, which
     /// exemplifies the typical use case of deferring the deallocation of a shared reference:
     ///
     /// ```ignore
     /// let shared = Owned::new(7i32).into_shared(guard);
-    /// guard.defer_destroy(move || shared.into_owned()); // `Shared` is not `Send`!
+    /// guard.defer_destroy(shared); // `Shared` is not `Send`!
     /// ```
     ///
-    /// While `Shared` is not `Send`, it's safe for another thread to call the deferred function,
-    /// because it's called only after the grace period and `shared` is no longer shared with other
+    /// While `Shared` is not `Send`, it's safe for another thread to call the destructor, because
+    /// it's called only after the grace period and `shared` is no longer shared with other
     /// threads. But we don't expect type systems to prove this.
     ///
     /// # Examples
