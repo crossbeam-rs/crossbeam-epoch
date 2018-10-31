@@ -94,7 +94,7 @@ mod sync;
 
 pub use self::atomic::{
     Atomic as AtomicTmpl, CompareAndSetError, CompareAndSetOrdering, Owned as OwnedTmpl, Pointer,
-    Shared as SharedTmpl, Storage,
+    Shared as SharedTmpl, Storage, decompose_data,
 };
 pub use self::collector::{Collector, LocalHandle};
 #[cfg(feature = "use_std")]

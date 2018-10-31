@@ -1,4 +1,3 @@
-use alloc::boxed::Box;
 use core::borrow::{Borrow, BorrowMut};
 use core::cmp;
 use core::fmt;
@@ -13,14 +12,50 @@ use crossbeam_utils::AtomicConsume;
 
 use Guard;
 
-/// Storage.
+/// Qualifies word-sized storage types that own `T`.
 ///
-/// TODO
+/// DST is very useful in the construction of concurrent data structures.  Consider a node in a
+/// skiplist.  It consists of: key, value, tower. The tower is an array of atomic pointers.  To save
+/// a level of indirection, it is wise to lay out the entire tower inside the node.  Since towers
+/// consist of variable number of pointers, skiplist nodes are dynamically sized.
+///
+/// Another example might be arrays backing hash-tables or Chase-Lev deques.  They too are
+/// dynamically sized so it might make sense to lay out the length together with array's elements.
+/// B-tree nodes may likewise be dynamically sized.
+///
+/// However, Crossbeam had not supported DST because it used `Box<T>` as the underlying storage for
+/// atomic pointers.  When `T` is a DST, `Box<T>` becomes a fat pointer (consisting of the
+/// underlying pointer and an integer representing the size), which doesn't support atomic
+/// operations (such as compare-and-swap or fetch-and-add) in stable Rust.  There are also other
+/// reasons why one might want thin pointers with length stored within the object, like performance
+/// (cache locality) and memory consumption.
+///
+/// This trait was introduced to support DST by generalizing `Box<T>`: roughly speaking, what we
+/// require for a storage type is that (1) it is represented as a word, and (2) it owns a value of
+/// type `T`.  `Box<T>` indeed satisfies these conditions and it implements `Storage<T>`.  For an
+/// example of DST, see [`Array`] and [`ArrayBox`].
+///
+/// [`Array`]: struct.Array.html
+/// [`ArrayBox`]: struct.ArrayBox.html
+///
+/// # Safety
+///
+/// When `S` implements `Storage<T>`, it should satisfy the following conditions:
+///
+/// - When an storage object is converted to `*mut T` and then back, it should be the same
+///   storage object.
+///
+/// - The result of `into_raw()` should be properly aligned as a pointer to `T`.
 pub unsafe trait Storage<T> {
-    /// TODO
+    /// Converts the storage type to `*mut T`.
     fn into_raw(self) -> *mut T;
 
-    /// TODO
+    /// Converts back `*mut T` to the storage type.
+    ///
+    /// # Safety
+    ///
+    /// The given `*mut T` pointer shall be originated from a storage object; otherwise, the
+    /// behavior is undefined.
     unsafe fn from_raw(*mut T) -> Self;
 }
 
@@ -139,7 +174,7 @@ pub fn decompose_data<T>(data: usize) -> (*mut T, usize) {
 /// Any method that loads the pointer must be passed a reference to a [`Guard`].
 ///
 /// [`Guard`]: struct.Guard.html
-pub struct Atomic<T, S: Storage<T> = Box<T>> {
+pub struct Atomic<T, S: Storage<T>> {
     data: AtomicUsize,
     _marker: PhantomData<(*mut T, S)>,
 }
@@ -571,7 +606,7 @@ impl<'g, T, S: Storage<T>> From<Shared<'g, T, S>> for Atomic<T, S> {
 // }
 
 /// A trait for either `Owned` or `Shared` pointers.
-pub trait Pointer<T, S: Storage<T> = Box<T>> {
+pub trait Pointer<T, S: Storage<T>> {
     /// Returns the machine representation of the pointer.
     fn into_usize(self) -> usize;
 
@@ -581,11 +616,11 @@ pub trait Pointer<T, S: Storage<T> = Box<T>> {
 
 /// An owned heap-allocated object.
 ///
-/// This type is very similar to `Box<T>`. TODO: this comment is outdated.
+/// This type is very similar to the storage type `S` (think: `Box<T>`).
 ///
 /// The pointer must be properly aligned. Since it is aligned, a tag can be stored into the unused
 /// least significant bits of the address.
-pub struct Owned<T, S: Storage<T> = Box<T>> {
+pub struct Owned<T, S: Storage<T>> {
     data: usize,
     _marker: PhantomData<(T, S)>,
 }
@@ -771,7 +806,7 @@ impl<T, S: Storage<T>> From<S> for Owned<T, S> {
 ///
 /// The pointer must be properly aligned. Since it is aligned, a tag can be stored into the unused
 /// least significant bits of the address.
-pub struct Shared<'g, T: 'g, S: Storage<T> = Box<T>> {
+pub struct Shared<'g, T: 'g, S: Storage<T>> {
     data: usize,
     _marker: PhantomData<(&'g (), *const T, S)>,
 }
@@ -1070,11 +1105,11 @@ mod tests {
 
     #[test]
     fn valid_tag_i8() {
-        Shared::<i8>::null().with_tag(0);
+        Shared::<i8, Box<_>>::null().with_tag(0);
     }
 
     #[test]
     fn valid_tag_i64() {
-        Shared::<i64>::null().with_tag(7);
+        Shared::<i64, Box<_>>::null().with_tag(7);
     }
 }

@@ -2,16 +2,27 @@ use alloc::boxed::Box;
 
 use atomic::decompose_data;
 
-use {AtomicTmpl, OwnedTmpl, Pointer, SharedTmpl, Storage};
+use {AtomicTmpl, OwnedTmpl, SharedTmpl, Pointer, Storage};
 
-/// TODO
-pub type Atomic<T> = AtomicTmpl<T>;
+/// An atomic pointer that can be safely shared between threads.
+///
+/// See [`AtomicTmpl`] for more details.
+///
+/// [`AtomicTmpl`]: struct.AtomicTmpl.html
+pub type Atomic<T> = AtomicTmpl<T, Box<T>>;
 
-/// TODO
+/// An owned heap-allocated object.
+///
+/// This type is very similar to `Box<T>`.  See [`OwnedTmpl`] for more details.
+///
+/// [`OwnedTmpl`]: struct.OwnedTmpl.html
+pub type Owned<T> = OwnedTmpl<T, Box<T>>;
 
-pub type Owned<T> = OwnedTmpl<T>;
-
-/// TODO
+/// A pointer to an object protected by the epoch GC.
+///
+/// See [`SharedTmpl`] for more details.
+///
+/// [`SharedTmpl`]: struct.SharedTmpl.html
 pub type Shared<'g, T> = SharedTmpl<'g, T, Box<T>>;
 
 unsafe impl<T> Storage<T> for Box<T> {
