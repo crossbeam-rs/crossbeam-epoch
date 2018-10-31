@@ -2,7 +2,7 @@ use core::fmt;
 use core::ptr;
 use core::mem;
 
-use atomic::Shared;
+use atomic::{Shared, Storage};
 use collector::Collector;
 use deferred::Deferred;
 use internal::Local;
@@ -276,7 +276,7 @@ impl Guard {
     /// ```
     ///
     /// [`unprotected`]: fn.unprotected.html
-    pub unsafe fn defer_destroy<T>(&self, ptr: Shared<T>) {
+    pub unsafe fn defer_destroy<T, S: Storage<T>>(&self, ptr: Shared<T, S>) {
         self.defer_unchecked(move || ptr.into_owned());
     }
 

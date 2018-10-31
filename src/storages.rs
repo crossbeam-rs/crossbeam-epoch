@@ -2,6 +2,7 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::marker::PhantomData;
 use core::mem;
+use core::ops::{Deref, DerefMut};
 use core::ptr;
 use core::mem::ManuallyDrop;
 
@@ -111,7 +112,7 @@ impl<T> Array<T> {
 
     /// TODO: index should be < self.size()
     pub unsafe fn at(&self, index: usize) -> *const ManuallyDrop<T> {
-        debug_assert!(index < self.size(), "Array::at(): index should be < size");
+        debug_assert!(index < self.size(), "Array::at(): index {} should be < size {}", index, self.size());
 
         let anchor = &self.anchor as *const ManuallyDrop<T>;
         anchor.add(index)
@@ -216,5 +217,19 @@ unsafe impl<T> Storage<Array<T>> for ArrayBox<T> {
             ptr,
             _marker: PhantomData,
         }
+    }
+}
+
+impl<T> Deref for ArrayBox<T> {
+    type Target = Array<T>;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { &*self.ptr }
+    }
+}
+
+impl<T> DerefMut for ArrayBox<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { &mut *self.ptr }
     }
 }
