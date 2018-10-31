@@ -77,10 +77,10 @@ pub struct Array<T> {
 impl<T> Array<T> {
     /// Returns its size.
     pub fn size(&self) -> usize {
-        let usize_align = core::mem::align_of::<usize>();
-        let usize_size = core::mem::size_of::<usize>();
-        let t_align = core::mem::align_of::<T>();
-        let t_size = core::mem::size_of::<T>();
+        let usize_align = mem::align_of::<usize>();
+        let usize_size = mem::size_of::<usize>();
+        let t_align = mem::align_of::<T>();
+        let t_size = mem::size_of::<T>();
 
         unsafe {
             // The memory layout varies depending on whether `T`'s alignment is <= `usize`'s
@@ -145,10 +145,10 @@ fn div_ceil(a: usize, b: usize) -> usize {
 impl<T> ArrayBox<T> {
     /// Creates a new array and returns the owning pointer to the new array.
     pub fn new(num: usize) -> Self {
-        let usize_align = core::mem::align_of::<usize>();
-        let usize_size = core::mem::size_of::<usize>();
-        let t_align = core::mem::align_of::<T>();
-        let t_size = core::mem::size_of::<T>();
+        let usize_align = mem::align_of::<usize>();
+        let usize_size = mem::size_of::<usize>();
+        let t_align = mem::align_of::<T>();
+        let t_size = mem::size_of::<T>();
 
         // The memory layout varies depending on whether `T`'s alignment is <= `usize`'s alignment
         // or not.
@@ -190,10 +190,10 @@ impl<T> ArrayBox<T> {
 impl<T> Drop for ArrayBox<T> {
     /// Destroys the array it owns.
     fn drop(&mut self) {
-        let usize_align = core::mem::align_of::<usize>();
-        let usize_size = core::mem::size_of::<usize>();
-        let t_align = core::mem::align_of::<T>();
-        let t_size = core::mem::size_of::<T>();
+        let usize_align = mem::align_of::<usize>();
+        let usize_size = mem::size_of::<usize>();
+        let t_align = mem::align_of::<T>();
+        let t_size = mem::size_of::<T>();
 
         unsafe {
             // The memory layout varies depending on whether `T`'s alignment is <= `usize`'s
