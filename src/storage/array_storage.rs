@@ -37,14 +37,16 @@ pub type SharedArray<'g, T> = SharedTmpl<'g, Array<T>, ArrayBox<T>>;
 /// the first element of the array, which we call the "anchor".  Size is stored before the anchor,
 /// and the other elements are located after the anchor:
 ///
-///              anchor
-///              |
-///              |
-///     ------------------------------------
-///     | size | 0 | 1 | 2 | 3 | 4 | 5 | 6 |
-///     ------------------------------------
-///    
-///            <---> (Array<T>'s ordinary range)
+/// ```ignore
+///          anchor
+///          |
+///          |
+/// ------------------------------------
+/// | size | 0 | 1 | 2 | 3 | 4 | 5 | 6 |
+/// ------------------------------------
+///
+///        <---> (Array<T>'s ordinary range)
+/// ```
 ///
 /// The location of the size varies depending on whether `T`'s alignment is <= `usize`'s alignment
 /// or not.  If so, the array is allocated as if it's an array of `usize`, and the size is stored a
