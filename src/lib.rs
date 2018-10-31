@@ -99,3 +99,4 @@ pub use self::collector::{Collector, LocalHandle};
 #[cfg(feature = "use_std")]
 pub use self::default::{default_collector, is_pinned, pin};
 pub use self::guard::{unprotected, Guard};
+pub use self::storages::{Array, ArrayBox};
