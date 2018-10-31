@@ -89,14 +89,16 @@ mod deferred;
 mod epoch;
 mod guard;
 mod internal;
-mod storages;
+mod storage;
 mod sync;
 
 pub use self::atomic::{
-    Atomic, CompareAndSetError, CompareAndSetOrdering, Owned, Pointer, Shared, Storage,
+    Atomic as AtomicTmpl, CompareAndSetError, CompareAndSetOrdering, Owned as OwnedTmpl, Pointer,
+    Shared as SharedTmpl, Storage,
 };
 pub use self::collector::{Collector, LocalHandle};
 #[cfg(feature = "use_std")]
 pub use self::default::{default_collector, is_pinned, pin};
 pub use self::guard::{unprotected, Guard};
-pub use self::storages::{Array, ArrayBox};
+pub use self::storage::array_storage::{Array, ArrayBox, AtomicArray, OwnedArray, SharedArray};
+pub use self::storage::box_storage::{Atomic, Owned, Shared};

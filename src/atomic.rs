@@ -11,7 +11,18 @@ use core::sync::atomic::{AtomicUsize, ATOMIC_USIZE_INIT};
 
 use crossbeam_utils::AtomicConsume;
 
-use {Guard};
+use Guard;
+
+/// Storage.
+///
+/// TODO
+pub unsafe trait Storage<T> {
+    /// TODO
+    fn into_raw(self) -> *mut T;
+
+    /// TODO
+    unsafe fn from_raw(*mut T) -> Self;
+}
 
 /// Given ordering for the success case in a compare-exchange operation, returns the strongest
 /// appropriate ordering for the failure case.
@@ -117,17 +128,6 @@ pub fn decompose_data<T>(data: usize) -> (*mut T, usize) {
     let raw = (data & !low_bits::<T>()) as *mut T;
     let tag = data & low_bits::<T>();
     (raw, tag)
-}
-
-/// Storage.
-///
-/// TODO
-pub unsafe trait Storage<T> {
-    /// TODO
-    fn into_raw(self) -> *mut T;
-
-    /// TODO
-    unsafe fn from_raw(*mut T) -> Self;
 }
 
 /// An atomic pointer that can be safely shared between threads.
@@ -629,7 +629,7 @@ impl<T, S: Storage<T>> Owned<T, S> {
     /// ```
     /// use crossbeam_epoch::Owned;
     ///
-    /// let o = unsafe { Owned::<_, Box<_>>::from_raw(Box::into_raw(Box::new(1234))) };
+    /// let o = unsafe { Owned::from_raw(Box::into_raw(Box::new(1234))) };
     /// ```
     pub unsafe fn from_raw(raw: *mut T) -> Owned<T, S> {
         ensure_aligned(raw);
@@ -758,7 +758,7 @@ impl<T, S: Storage<T>> From<S> for Owned<T, S> {
     /// ```
     /// use crossbeam_epoch::Owned;
     ///
-    /// let o = unsafe { Owned::<i32, Box<_>>::from(Box::new(1234)) };
+    /// let o = unsafe { Owned::<i32>::from(Box::new(1234)) };
     /// ```
     fn from(s: S) -> Self {
         unsafe { Self::from_raw(s.into_raw()) }
@@ -849,7 +849,7 @@ impl<'g, T, S: Storage<T>> Shared<'g, T, S> {
     /// ```
     /// use crossbeam_epoch::Shared;
     ///
-    /// let p = unsafe { Shared::<_, Box<_>>::from_raw(Box::into_raw(Box::new(1234)) as *const _) };
+    /// let p = unsafe { Shared::from_raw(Box::into_raw(Box::new(1234)) as *const _) };
     /// assert!(!p.is_null());
     /// ```
     pub unsafe fn from_raw(raw: *const T) -> Self {
